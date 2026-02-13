@@ -1,6 +1,6 @@
 # Binaries
 bin/
-infraplane
+/infraplane
 *.exe
 
 # Environment
