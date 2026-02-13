@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/matthewdriscoll/infraplane/internal/api"
 	"github.com/matthewdriscoll/infraplane/internal/llm"
 	mcpserver "github.com/matthewdriscoll/infraplane/internal/mcp"
 	"github.com/matthewdriscoll/infraplane/internal/repository/mock"
@@ -22,11 +24,16 @@ func main() {
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+	mode := os.Getenv("MCP_MODE") // "mcp" (default) or "http"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 
 	// Build LLM client
 	llmClient := llm.NewAnthropicClient(anthropicKey)
 
-	// Build repositories
+	// Build repositories and services
 	var appSvc *service.ApplicationService
 	var resSvc *service.ResourceService
 	var planSvc *service.PlannerService
@@ -66,11 +73,19 @@ func main() {
 		log.Println("Using in-memory storage (set DATABASE_URL for PostgreSQL)")
 	}
 
-	// Build and start MCP server
-	mcpSrv := mcpserver.NewServer(appSvc, resSvc, planSvc, depSvc)
-
-	log.Println("Infraplane MCP server starting on stdio...")
-	if err := server.ServeStdio(mcpSrv); err != nil {
-		log.Fatalf("MCP server error: %v", err)
+	if mode == "http" {
+		// HTTP REST API mode for the dashboard
+		router := api.NewRouter(appSvc, resSvc, planSvc, depSvc)
+		log.Printf("Infraplane REST API starting on :%s...", port)
+		if err := http.ListenAndServe(":"+port, router); err != nil {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	} else {
+		// Default: MCP server on stdio for Claude Code
+		mcpSrv := mcpserver.NewServer(appSvc, resSvc, planSvc, depSvc)
+		log.Println("Infraplane MCP server starting on stdio...")
+		if err := server.ServeStdio(mcpSrv); err != nil {
+			log.Fatalf("MCP server error: %v", err)
+		}
 	}
 }
