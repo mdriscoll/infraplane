@@ -13,6 +13,7 @@ describe('AppCard', () => {
     name: 'my-api',
     description: 'A test API',
     git_repo_url: '',
+    source_path: '/Users/dev/my-api',
     provider: 'aws',
     status: 'deployed',
     created_at: '2024-01-01T00:00:00Z',
@@ -45,6 +46,25 @@ describe('AppCard', () => {
       </MemoryRouter>
     )
     expect(screen.getByText('AWS')).toBeInTheDocument()
+  })
+
+  it('shows source path', () => {
+    render(
+      <MemoryRouter>
+        <AppCard app={app} />
+      </MemoryRouter>
+    )
+    expect(screen.getByText('/Users/dev/my-api')).toBeInTheDocument()
+  })
+
+  it('hides source path when empty', () => {
+    const appNoSource = { ...app, source_path: '' }
+    render(
+      <MemoryRouter>
+        <AppCard app={appNoSource} />
+      </MemoryRouter>
+    )
+    expect(screen.queryByText('/Users/dev/my-api')).not.toBeInTheDocument()
   })
 })
 

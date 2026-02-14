@@ -7,6 +7,7 @@ export interface Application {
   name: string
   description: string
   git_repo_url: string
+  source_path: string
   provider: 'aws' | 'gcp'
   status: 'draft' | 'provisioned' | 'deployed'
   created_at: string
@@ -92,8 +93,12 @@ export const registerApplication = (data: {
   name: string
   description?: string
   git_repo_url?: string
+  source_path?: string
   provider: string
 }) => request<Application>('/applications', { method: 'POST', body: JSON.stringify(data) })
+
+export const reanalyzeSource = (appName: string) =>
+  request<void>(`/applications/${appName}/reanalyze`, { method: 'POST' })
 
 export const deleteApplication = (name: string) =>
   request<void>(`/applications/${name}`, { method: 'DELETE' })

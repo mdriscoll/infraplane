@@ -19,7 +19,7 @@ func TestIntegrationDeploymentRepo(t *testing.T) {
 	repo := NewDeploymentRepo(pool)
 	ctx := context.Background()
 
-	app := domain.NewApplication("deploy-test-app", "desc", "", domain.ProviderAWS)
+	app := domain.NewApplication("deploy-test-app", "desc", "", "", domain.ProviderAWS)
 	if err := appRepo.Create(ctx, app); err != nil {
 		t.Fatalf("create app: %v", err)
 	}

@@ -52,7 +52,7 @@ func main() {
 		depRepo := postgres.NewDeploymentRepo(pool)
 		planRepo := postgres.NewPlanRepo(pool)
 
-		appSvc = service.NewApplicationService(appRepo)
+		appSvc = service.NewApplicationService(appRepo, resRepo, llmClient)
 		resSvc = service.NewResourceService(resRepo, appRepo, llmClient)
 		planSvc = service.NewPlannerService(planRepo, appRepo, resRepo, llmClient)
 		depSvc = service.NewDeploymentService(depRepo, appRepo)
@@ -65,7 +65,7 @@ func main() {
 		depRepo := mock.NewDeploymentRepo()
 		planRepo := mock.NewPlanRepo()
 
-		appSvc = service.NewApplicationService(appRepo)
+		appSvc = service.NewApplicationService(appRepo, resRepo, llmClient)
 		resSvc = service.NewResourceService(resRepo, appRepo, llmClient)
 		planSvc = service.NewPlannerService(planRepo, appRepo, resRepo, llmClient)
 		depSvc = service.NewDeploymentService(depRepo, appRepo)

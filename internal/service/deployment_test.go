@@ -16,7 +16,7 @@ func TestDeploymentService_Deploy(t *testing.T) {
 	svc := NewDeploymentService(depRepo, appRepo)
 	ctx := context.Background()
 
-	app := domain.NewApplication("deploy-app", "", "", domain.ProviderAWS)
+	app := domain.NewApplication("deploy-app", "", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
 	t.Run("successful deploy", func(t *testing.T) {
@@ -56,7 +56,7 @@ func TestDeploymentService_GetStatus(t *testing.T) {
 	svc := NewDeploymentService(depRepo, appRepo)
 	ctx := context.Background()
 
-	app := domain.NewApplication("status-app", "", "", domain.ProviderGCP)
+	app := domain.NewApplication("status-app", "", "", "", domain.ProviderGCP)
 	appRepo.Create(ctx, app)
 
 	d, _ := svc.Deploy(ctx, app.ID, "abc", "main")
@@ -85,7 +85,7 @@ func TestDeploymentService_MarkSucceeded(t *testing.T) {
 	svc := NewDeploymentService(depRepo, appRepo)
 	ctx := context.Background()
 
-	app := domain.NewApplication("succeed-app", "", "", domain.ProviderAWS)
+	app := domain.NewApplication("succeed-app", "", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
 	d, _ := svc.Deploy(ctx, app.ID, "abc", "main")
@@ -111,7 +111,7 @@ func TestDeploymentService_MarkFailed(t *testing.T) {
 	svc := NewDeploymentService(depRepo, appRepo)
 	ctx := context.Background()
 
-	app := domain.NewApplication("fail-app", "", "", domain.ProviderAWS)
+	app := domain.NewApplication("fail-app", "", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
 	d, _ := svc.Deploy(ctx, app.ID, "abc", "main")
@@ -134,7 +134,7 @@ func TestDeploymentService_GetLatest(t *testing.T) {
 	svc := NewDeploymentService(depRepo, appRepo)
 	ctx := context.Background()
 
-	app := domain.NewApplication("latest-app", "", "", domain.ProviderAWS)
+	app := domain.NewApplication("latest-app", "", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
 	first, _ := svc.Deploy(ctx, app.ID, "first", "main")

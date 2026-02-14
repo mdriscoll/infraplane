@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/matthewdriscoll/infraplane/internal/analyzer"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 )
 
@@ -133,6 +134,74 @@ func buildHostingPlanPrompt(app domain.Application, resources []domain.Resource)
 		}
 	} else {
 		sb.WriteString("No resources defined yet. Recommend a basic hosting setup based on the application description.\n")
+	}
+
+	return sb.String()
+}
+
+const codebaseAnalysisSystemPrompt = `You are an expert cloud infrastructure architect. Your job is to analyze application source code files — including dependency manifests, Dockerfiles, configuration files, and deploy scripts — and identify all infrastructure resources the application needs.
+
+You must respond with ONLY a JSON array (no markdown, no explanation) where each element has this structure:
+
+[
+  {
+    "kind": "database|compute|storage|cache|queue|cdn|network",
+    "name": "a-kebab-case-name-for-this-resource",
+    "spec": {
+      // Kind-specific specification. Examples:
+      // database: {"engine": "postgres", "version": "16", "size": "small"}
+      // compute: {"runtime": "docker", "cpu": "0.25", "memory": "512MB"}
+      // storage: {"type": "object", "access": "private"}
+      // cache: {"engine": "redis", "version": "7", "size": "small"}
+      // queue: {"type": "standard", "fifo": false}
+      // cdn: {"origin_type": "s3"}
+      // network: {"type": "vpc", "cidr": "10.0.0.0/16"}
+    },
+    "mappings": {
+      "aws": {
+        "service_name": "The AWS service name",
+        "config": {},
+        "terraform_hcl": "Complete Terraform HCL for this resource on AWS"
+      },
+      "gcp": {
+        "service_name": "The GCP service name",
+        "config": {},
+        "terraform_hcl": "Complete Terraform HCL for this resource on GCP"
+      }
+    }
+  }
+]
+
+Detection guidelines:
+- Look for database drivers/ORMs in dependency files (e.g. pg, prisma, sqlalchemy, gorm) → database resource
+- Look for Redis/Memcached clients → cache resource
+- Look for message queue clients (SQS, RabbitMQ, Kafka, BullMQ) → queue resource
+- Look for S3/storage SDK usage → storage resource
+- Look for Dockerfile/docker-compose services → compute resource and any services defined
+- Look for environment variables referencing infrastructure (DATABASE_URL, REDIS_URL, etc.)
+- Look for existing Terraform files → extract resources defined there
+- Look for Kubernetes manifests → identify required resources
+- If docker-compose defines services like postgres, redis, etc. → map to managed cloud equivalents
+- Choose the smallest/cheapest tier appropriate for a development environment
+- Generate production-ready Terraform HCL with sensible defaults
+- Include both AWS and GCP mappings in every resource
+- If no infrastructure resources are detected, return an empty array []`
+
+func buildCodebaseAnalysisPrompt(codeCtx analyzer.CodeContext, provider domain.CloudProvider) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Analyze the following application codebase and identify all infrastructure resources needed.\n\n"))
+	sb.WriteString(fmt.Sprintf("Preferred cloud provider: %s\n\n", provider))
+
+	if len(codeCtx.Files) == 0 {
+		sb.WriteString("No infrastructure-relevant files were found. Return an empty array [].\n")
+		return sb.String()
+	}
+
+	sb.WriteString(fmt.Sprintf("Found %d infrastructure-relevant files:\n\n", len(codeCtx.Files)))
+	for _, f := range codeCtx.Files {
+		sb.WriteString(fmt.Sprintf("--- %s ---\n", f.Path))
+		sb.WriteString(f.Content)
+		sb.WriteString("\n\n")
 	}
 
 	return sb.String()

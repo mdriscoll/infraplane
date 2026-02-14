@@ -28,6 +28,17 @@ export function useRegisterApplication() {
   })
 }
 
+export function useReanalyzeSource(appName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.reanalyzeSource(appName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['applications', appName] })
+      queryClient.invalidateQueries({ queryKey: ['resources', appName] })
+    },
+  })
+}
+
 export function useDeleteApplication() {
   const queryClient = useQueryClient()
   return useMutation({

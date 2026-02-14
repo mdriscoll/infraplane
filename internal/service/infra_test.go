@@ -33,7 +33,7 @@ func TestInfraService_GenerateTerraform(t *testing.T) {
 	svc, appRepo, resRepo := setupInfraService(domain.ProviderAWS, nil)
 	ctx := context.Background()
 
-	app := domain.NewApplication("tf-app", "", "", domain.ProviderAWS)
+	app := domain.NewApplication("tf-app", "", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
 	resource := domain.NewResource(app.ID, domain.ResourceDatabase, "user-db", json.RawMessage(`{"engine": "postgres"}`))
@@ -73,7 +73,7 @@ func TestInfraService_DeployInfrastructure(t *testing.T) {
 	t.Run("successful deployment", func(t *testing.T) {
 		svc, appRepo, resRepo := setupInfraService(domain.ProviderAWS, nil)
 
-		app := domain.NewApplication("deploy-app", "", "", domain.ProviderAWS)
+		app := domain.NewApplication("deploy-app", "", "", "", domain.ProviderAWS)
 		appRepo.Create(ctx, app)
 
 		resource := domain.NewResource(app.ID, domain.ResourceDatabase, "db", json.RawMessage(`{}`))
@@ -106,7 +106,7 @@ func TestInfraService_DeployInfrastructure(t *testing.T) {
 	t.Run("apply failure marks deployment as failed", func(t *testing.T) {
 		svc, appRepo, _ := setupInfraService(domain.ProviderAWS, fmt.Errorf("terraform error"))
 
-		app := domain.NewApplication("fail-app", "", "", domain.ProviderAWS)
+		app := domain.NewApplication("fail-app", "", "", "", domain.ProviderAWS)
 		appRepo.Create(ctx, app)
 
 		d, err := svc.DeployInfrastructure(ctx, app.ID, "abc123", "main")
@@ -132,7 +132,7 @@ func TestInfraService_DeployInfrastructure(t *testing.T) {
 
 		svc := NewInfraService(appRepo, resRepo, depRepo, reg)
 
-		app := domain.NewApplication("no-adapter-app", "", "", domain.ProviderAWS)
+		app := domain.NewApplication("no-adapter-app", "", "", "", domain.ProviderAWS)
 		appRepo.Create(ctx, app)
 
 		d, err := svc.DeployInfrastructure(ctx, app.ID, "abc", "main")
@@ -154,7 +154,7 @@ func TestInfraService_DeployInfrastructure(t *testing.T) {
 
 	t.Run("missing branch", func(t *testing.T) {
 		svc, appRepo, _ := setupInfraService(domain.ProviderAWS, nil)
-		app := domain.NewApplication("no-branch", "", "", domain.ProviderAWS)
+		app := domain.NewApplication("no-branch", "", "", "", domain.ProviderAWS)
 		appRepo.Create(ctx, app)
 
 		_, err := svc.DeployInfrastructure(ctx, app.ID, "abc", "")
@@ -190,7 +190,7 @@ func TestInfraService_DestroyInfrastructure(t *testing.T) {
 	t.Run("successful destroy", func(t *testing.T) {
 		svc, appRepo, resRepo := setupInfraService(domain.ProviderAWS, nil)
 
-		app := domain.NewApplication("destroy-app", "", "", domain.ProviderAWS)
+		app := domain.NewApplication("destroy-app", "", "", "", domain.ProviderAWS)
 		appRepo.Create(ctx, app)
 
 		resource := domain.NewResource(app.ID, domain.ResourceDatabase, "db", json.RawMessage(`{}`))

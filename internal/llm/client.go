@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/matthewdriscoll/infraplane/internal/analyzer"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 )
 
@@ -33,6 +34,10 @@ type Client interface {
 	// AnalyzeResourceNeed interprets a natural language resource description
 	// and returns a structured resource recommendation with provider mappings.
 	AnalyzeResourceNeed(ctx context.Context, description string, provider domain.CloudProvider) (ResourceRecommendation, error)
+
+	// AnalyzeCodebase examines extracted code files from a project and recommends
+	// infrastructure resources based on dependencies, configs, and deploy scripts.
+	AnalyzeCodebase(ctx context.Context, codeCtx analyzer.CodeContext, provider domain.CloudProvider) ([]ResourceRecommendation, error)
 
 	// GenerateHostingPlan analyzes an application's resources and generates
 	// a hosting strategy with cost estimates.

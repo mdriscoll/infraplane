@@ -21,6 +21,7 @@ type Application struct {
 	Name        string        `json:"name"`
 	Description string        `json:"description"`
 	GitRepoURL  string        `json:"git_repo_url"`
+	SourcePath  string        `json:"source_path"`
 	Provider    CloudProvider `json:"provider"`
 	Status      AppStatus     `json:"status"`
 	CreatedAt   time.Time     `json:"created_at"`
@@ -28,13 +29,14 @@ type Application struct {
 }
 
 // NewApplication creates a new Application in draft status.
-func NewApplication(name, description, gitRepoURL string, provider CloudProvider) Application {
+func NewApplication(name, description, gitRepoURL, sourcePath string, provider CloudProvider) Application {
 	now := time.Now().UTC()
 	return Application{
 		ID:          uuid.New(),
 		Name:        name,
 		Description: description,
 		GitRepoURL:  gitRepoURL,
+		SourcePath:  sourcePath,
 		Provider:    provider,
 		Status:      AppStatusDraft,
 		CreatedAt:   now,

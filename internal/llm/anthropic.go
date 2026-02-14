@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/matthewdriscoll/infraplane/internal/analyzer"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 )
 
@@ -42,6 +43,21 @@ func (c *AnthropicClient) AnalyzeResourceNeed(ctx context.Context, description s
 		return ResourceRecommendation{}, fmt.Errorf("parse resource recommendation: %w", err)
 	}
 	return result, nil
+}
+
+func (c *AnthropicClient) AnalyzeCodebase(ctx context.Context, codeCtx analyzer.CodeContext, provider domain.CloudProvider) ([]ResourceRecommendation, error) {
+	prompt := buildCodebaseAnalysisPrompt(codeCtx, provider)
+
+	resp, err := c.sendMessage(ctx, prompt, codebaseAnalysisSystemPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("analyze codebase: %w", err)
+	}
+
+	var results []ResourceRecommendation
+	if err := json.Unmarshal([]byte(resp), &results); err != nil {
+		return nil, fmt.Errorf("parse codebase analysis: %w", err)
+	}
+	return results, nil
 }
 
 func (c *AnthropicClient) GenerateHostingPlan(ctx context.Context, app domain.Application, resources []domain.Resource) (HostingPlanResult, error) {
@@ -143,6 +159,24 @@ func extractJSON(text string) string {
 			braceCount--
 			if braceCount == 0 && braceStart >= 0 {
 				return text[braceStart : i+1]
+			}
+		}
+	}
+
+	// Try to find raw JSON array
+	bracketStart := -1
+	bracketCount := 0
+	for i, ch := range text {
+		if ch == '[' {
+			if bracketStart == -1 {
+				bracketStart = i
+			}
+			bracketCount++
+		}
+		if ch == ']' {
+			bracketCount--
+			if bracketCount == 0 && bracketStart >= 0 {
+				return text[bracketStart : i+1]
 			}
 		}
 	}

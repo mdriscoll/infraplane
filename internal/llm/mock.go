@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/matthewdriscoll/infraplane/internal/analyzer"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 )
 
@@ -11,6 +12,7 @@ import (
 // Set the return values before calling the methods.
 type MockClient struct {
 	AnalyzeResourceNeedFn    func(ctx context.Context, description string, provider domain.CloudProvider) (ResourceRecommendation, error)
+	AnalyzeCodebaseFn        func(ctx context.Context, codeCtx analyzer.CodeContext, provider domain.CloudProvider) ([]ResourceRecommendation, error)
 	GenerateHostingPlanFn    func(ctx context.Context, app domain.Application, resources []domain.Resource) (HostingPlanResult, error)
 	GenerateMigrationPlanFn  func(ctx context.Context, app domain.Application, resources []domain.Resource, from, to domain.CloudProvider) (MigrationPlanResult, error)
 }
@@ -20,6 +22,13 @@ func (m *MockClient) AnalyzeResourceNeed(ctx context.Context, description string
 		return m.AnalyzeResourceNeedFn(ctx, description, provider)
 	}
 	return defaultResourceRecommendation(), nil
+}
+
+func (m *MockClient) AnalyzeCodebase(ctx context.Context, codeCtx analyzer.CodeContext, provider domain.CloudProvider) ([]ResourceRecommendation, error) {
+	if m.AnalyzeCodebaseFn != nil {
+		return m.AnalyzeCodebaseFn(ctx, codeCtx, provider)
+	}
+	return defaultCodebaseRecommendations(), nil
 }
 
 func (m *MockClient) GenerateHostingPlan(ctx context.Context, app domain.Application, resources []domain.Resource) (HostingPlanResult, error) {
@@ -34,6 +43,45 @@ func (m *MockClient) GenerateMigrationPlan(ctx context.Context, app domain.Appli
 		return m.GenerateMigrationPlanFn(ctx, app, resources, from, to)
 	}
 	return defaultMigrationPlan(), nil
+}
+
+func defaultCodebaseRecommendations() []ResourceRecommendation {
+	return []ResourceRecommendation{
+		{
+			Kind: domain.ResourceDatabase,
+			Name: "app-database",
+			Spec: json.RawMessage(`{"engine": "postgres", "version": "16"}`),
+			Mappings: map[domain.CloudProvider]domain.ProviderResource{
+				domain.ProviderAWS: {
+					ServiceName:  "RDS",
+					Config:       map[string]any{"instance_class": "db.t3.micro"},
+					TerraformHCL: `resource "aws_db_instance" "app_database" {}`,
+				},
+				domain.ProviderGCP: {
+					ServiceName:  "Cloud SQL",
+					Config:       map[string]any{"tier": "db-f1-micro"},
+					TerraformHCL: `resource "google_sql_database_instance" "app_database" {}`,
+				},
+			},
+		},
+		{
+			Kind: domain.ResourceCache,
+			Name: "app-cache",
+			Spec: json.RawMessage(`{"engine": "redis", "version": "7"}`),
+			Mappings: map[domain.CloudProvider]domain.ProviderResource{
+				domain.ProviderAWS: {
+					ServiceName:  "ElastiCache",
+					Config:       map[string]any{"node_type": "cache.t3.micro"},
+					TerraformHCL: `resource "aws_elasticache_cluster" "app_cache" {}`,
+				},
+				domain.ProviderGCP: {
+					ServiceName:  "Memorystore",
+					Config:       map[string]any{"tier": "BASIC"},
+					TerraformHCL: `resource "google_redis_instance" "app_cache" {}`,
+				},
+			},
+		},
+	}
 }
 
 func defaultResourceRecommendation() ResourceRecommendation {

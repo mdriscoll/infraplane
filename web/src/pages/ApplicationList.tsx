@@ -7,16 +7,18 @@ export default function ApplicationList() {
   const registerMutation = useRegisterApplication()
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
+  const [sourcePath, setSourcePath] = useState('')
   const [description, setDescription] = useState('')
   const [provider, setProvider] = useState('aws')
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     registerMutation.mutate(
-      { name, description, provider },
+      { name, source_path: sourcePath || undefined, description: description || undefined, provider },
       {
         onSuccess: () => {
           setName('')
+          setSourcePath('')
           setDescription('')
           setProvider('aws')
           setShowForm(false)
@@ -74,13 +76,26 @@ export default function ApplicationList() {
               </select>
             </div>
             <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Source</label>
+              <input
+                type="text"
+                value={sourcePath}
+                onChange={(e) => setSourcePath(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="/path/to/project or https://github.com/org/repo"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Provide a local path or git URL to auto-detect infrastructure resources
+              </p>
+            </div>
+            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
               <input
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="A brief description of your application"
+                placeholder="A brief description of your application (optional)"
               />
             </div>
           </div>

@@ -27,6 +27,11 @@ export default function AppCard({ app }: { app: Application }) {
       {app.description && (
         <p className="text-sm text-gray-500 mb-3">{app.description}</p>
       )}
+      {app.source_path && (
+        <p className="text-xs text-gray-400 mb-3 truncate" title={app.source_path}>
+          {app.source_path}
+        </p>
+      )}
       <div className="flex items-center gap-2">
         <span className="inline-flex items-center text-xs font-medium px-2 py-1 rounded bg-indigo-50 text-indigo-700">
           {providerLabels[app.provider] || app.provider}

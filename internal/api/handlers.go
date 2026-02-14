@@ -40,6 +40,7 @@ type registerAppRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	GitRepoURL  string `json:"git_repo_url"`
+	SourcePath  string `json:"source_path"`
 	Provider    string `json:"provider"`
 }
 
@@ -70,7 +71,7 @@ func (h *Handlers) RegisterApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app, err := h.apps.Register(r.Context(), req.Name, req.Description, req.GitRepoURL, domain.CloudProvider(req.Provider))
+	app, err := h.apps.Register(r.Context(), req.Name, req.Description, req.GitRepoURL, req.SourcePath, domain.CloudProvider(req.Provider))
 	if err != nil {
 		handleServiceError(w, err)
 		return
@@ -128,6 +129,25 @@ func (h *Handlers) DeleteApplication(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.apps.Delete(r.Context(), app.ID); err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Reanalyze Handler ---
+
+func (h *Handlers) ReanalyzeSource(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	app, err := h.apps.GetByName(r.Context(), name)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	if err := h.apps.ReanalyzeSource(r.Context(), app.ID); err != nil {
 		handleServiceError(w, err)
 		return
 	}

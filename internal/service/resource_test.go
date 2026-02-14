@@ -19,7 +19,7 @@ func TestResourceService_AddFromDescription(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a parent app
-	app := domain.NewApplication("test-app", "desc", "", domain.ProviderAWS)
+	app := domain.NewApplication("test-app", "desc", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
 	t.Run("successful add from description", func(t *testing.T) {
@@ -88,7 +88,7 @@ func TestResourceService_ListByApplication(t *testing.T) {
 	svc := NewResourceService(resRepo, appRepo, mockLLM)
 	ctx := context.Background()
 
-	app := domain.NewApplication("list-test", "", "", domain.ProviderAWS)
+	app := domain.NewApplication("list-test", "", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
 	svc.AddFromDescription(ctx, app.ID, "database")
@@ -110,7 +110,7 @@ func TestResourceService_Remove(t *testing.T) {
 	svc := NewResourceService(resRepo, appRepo, mockLLM)
 	ctx := context.Background()
 
-	app := domain.NewApplication("remove-test", "", "", domain.ProviderAWS)
+	app := domain.NewApplication("remove-test", "", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
 	resource, _ := svc.AddFromDescription(ctx, app.ID, "database")

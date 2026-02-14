@@ -1,0 +1,1 @@
+ALTER TABLE applications ADD COLUMN source_path VARCHAR(1024) NOT NULL DEFAULT '';

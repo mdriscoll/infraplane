@@ -52,10 +52,11 @@ func (h *ToolHandlers) RegisterAll(s *server.MCPServer) {
 
 func registerApplicationTool() gomcp.Tool {
 	return gomcp.NewTool("register_application",
-		gomcp.WithDescription("Register a new application in Infraplane. Creates a cloud-agnostic application entry that infrastructure resources can be attached to."),
+		gomcp.WithDescription("Register a new application in Infraplane. Provide a source path (local directory or git URL) to auto-detect infrastructure resources from the codebase."),
 		gomcp.WithString("name", gomcp.Required(), gomcp.Description("Application name (must be unique, kebab-case recommended)")),
 		gomcp.WithString("description", gomcp.Description("Brief description of what the application does")),
 		gomcp.WithString("git_repo_url", gomcp.Description("Git repository URL (e.g. https://github.com/org/repo)")),
+		gomcp.WithString("source_path", gomcp.Description("Local filesystem path or git URL to analyze for auto-detecting infrastructure resources (e.g. '/path/to/project' or 'https://github.com/org/repo')")),
 		gomcp.WithString("provider", gomcp.Required(), gomcp.Description("Preferred cloud provider"), gomcp.Enum("aws", "gcp")),
 	)
 }
@@ -129,7 +130,8 @@ func (h *ToolHandlers) handleRegisterApplication(ctx context.Context, req gomcp.
 	gitRepoURL := req.GetString("git_repo_url", "")
 	provider, _ := req.RequireString("provider")
 
-	app, err := h.apps.Register(ctx, name, description, gitRepoURL, domain.CloudProvider(provider))
+	sourcePath := req.GetString("source_path", "")
+	app, err := h.apps.Register(ctx, name, description, gitRepoURL, sourcePath, domain.CloudProvider(provider))
 	if err != nil {
 		return toolError(err), nil
 	}

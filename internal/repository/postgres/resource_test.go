@@ -20,7 +20,7 @@ func TestIntegrationResourceRepo(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a parent application
-	app := domain.NewApplication("resource-test-app", "desc", "", domain.ProviderAWS)
+	app := domain.NewApplication("resource-test-app", "desc", "", "", domain.ProviderAWS)
 	if err := appRepo.Create(ctx, app); err != nil {
 		t.Fatalf("create app: %v", err)
 	}

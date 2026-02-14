@@ -18,7 +18,7 @@ func TestIntegrationApplicationRepo(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Create and GetByID", func(t *testing.T) {
-		app := domain.NewApplication("create-get-test", "desc", "https://github.com/test/repo", domain.ProviderAWS)
+		app := domain.NewApplication("create-get-test", "desc", "https://github.com/test/repo", "", domain.ProviderAWS)
 		if err := repo.Create(ctx, app); err != nil {
 			t.Fatalf("Create() error = %v", err)
 		}
@@ -46,7 +46,7 @@ func TestIntegrationApplicationRepo(t *testing.T) {
 	})
 
 	t.Run("GetByName", func(t *testing.T) {
-		app := domain.NewApplication("name-lookup-test", "desc", "", domain.ProviderGCP)
+		app := domain.NewApplication("name-lookup-test", "desc", "", "", domain.ProviderGCP)
 		if err := repo.Create(ctx, app); err != nil {
 			t.Fatalf("Create() error = %v", err)
 		}
@@ -78,7 +78,7 @@ func TestIntegrationApplicationRepo(t *testing.T) {
 	})
 
 	t.Run("Update", func(t *testing.T) {
-		app := domain.NewApplication("update-test", "original", "", domain.ProviderAWS)
+		app := domain.NewApplication("update-test", "original", "", "", domain.ProviderAWS)
 		if err := repo.Create(ctx, app); err != nil {
 			t.Fatalf("Create() error = %v", err)
 		}
@@ -99,14 +99,14 @@ func TestIntegrationApplicationRepo(t *testing.T) {
 	})
 
 	t.Run("Update not found", func(t *testing.T) {
-		app := domain.NewApplication("ghost", "", "", domain.ProviderAWS)
+		app := domain.NewApplication("ghost", "", "", "", domain.ProviderAWS)
 		if err := repo.Update(ctx, app); err != domain.ErrNotFound {
 			t.Errorf("got %v, want ErrNotFound", err)
 		}
 	})
 
 	t.Run("Delete", func(t *testing.T) {
-		app := domain.NewApplication("delete-test", "", "", domain.ProviderAWS)
+		app := domain.NewApplication("delete-test", "", "", "", domain.ProviderAWS)
 		if err := repo.Create(ctx, app); err != nil {
 			t.Fatalf("Create() error = %v", err)
 		}

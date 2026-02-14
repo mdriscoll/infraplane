@@ -12,6 +12,7 @@ import {
   useDeploy,
   usePlans,
   useGenerateHostingPlan,
+  useReanalyzeSource,
 } from '../hooks/useApi'
 
 export default function ApplicationDetail() {
@@ -25,6 +26,7 @@ export default function ApplicationDetail() {
   const deleteApp = useDeleteApplication()
   const deployMutation = useDeploy(name!)
   const hostingPlan = useGenerateHostingPlan(name!)
+  const reanalyze = useReanalyzeSource(name!)
 
   const [resourceDesc, setResourceDesc] = useState('')
   const [gitBranch, setGitBranch] = useState('main')
@@ -59,6 +61,11 @@ export default function ApplicationDetail() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{app.name}</h1>
           {app.description && <p className="text-gray-500 mt-1">{app.description}</p>}
+          {app.source_path && (
+            <p className="text-sm text-gray-400 mt-1 truncate" title={app.source_path}>
+              Source: {app.source_path}
+            </p>
+          )}
           <div className="flex gap-2 mt-2">
             <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
               {app.provider.toUpperCase()}
@@ -78,7 +85,21 @@ export default function ApplicationDetail() {
 
       {/* Resources */}
       <section>
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Resources</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Resources</h2>
+          {app.source_path && (
+            <button
+              onClick={() => reanalyze.mutate()}
+              disabled={reanalyze.isPending}
+              className="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+            >
+              {reanalyze.isPending ? 'Re-analyzing...' : 'Re-analyze Source'}
+            </button>
+          )}
+        </div>
+        {reanalyze.isError && (
+          <p className="text-sm text-red-500 mb-4">{reanalyze.error.message}</p>
+        )}
         <ResourceList
           resources={resources}
           onRemove={(id) => removeResource.mutate(id)}
@@ -90,7 +111,7 @@ export default function ApplicationDetail() {
             value={resourceDesc}
             onChange={(e) => setResourceDesc(e.target.value)}
             className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            placeholder="Describe a resource (e.g. 'a PostgreSQL database for user data')"
+            placeholder="Describe an additional resource (e.g. 'a PostgreSQL database for user data')"
             required
           />
           <button

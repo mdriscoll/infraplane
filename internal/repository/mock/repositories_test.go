@@ -13,7 +13,7 @@ func TestApplicationRepo_CRUD(t *testing.T) {
 	repo := NewApplicationRepo()
 	ctx := context.Background()
 
-	app := domain.NewApplication("test-app", "Test app", "https://github.com/test/repo", domain.ProviderAWS)
+	app := domain.NewApplication("test-app", "Test app", "https://github.com/test/repo", "", domain.ProviderAWS)
 
 	// Create
 	if err := repo.Create(ctx, app); err != nil {

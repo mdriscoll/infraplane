@@ -18,7 +18,7 @@ func TestIntegrationPlanRepo(t *testing.T) {
 	repo := NewPlanRepo(pool)
 	ctx := context.Background()
 
-	app := domain.NewApplication("plan-test-app", "desc", "", domain.ProviderAWS)
+	app := domain.NewApplication("plan-test-app", "desc", "", "", domain.ProviderAWS)
 	if err := appRepo.Create(ctx, app); err != nil {
 		t.Fatalf("create app: %v", err)
 	}

@@ -28,7 +28,7 @@ func TestCloudProvider_IsValid(t *testing.T) {
 }
 
 func TestNewApplication(t *testing.T) {
-	app := NewApplication("myapp", "A test app", "https://github.com/test/repo", ProviderAWS)
+	app := NewApplication("myapp", "A test app", "https://github.com/test/repo", "", ProviderAWS)
 
 	if app.Name != "myapp" {
 		t.Errorf("Name = %q, want %q", app.Name, "myapp")
@@ -52,7 +52,7 @@ func TestApplication_Validate(t *testing.T) {
 	}{
 		{
 			name:    "valid application",
-			app:     NewApplication("myapp", "desc", "https://github.com/test/repo", ProviderAWS),
+			app:     NewApplication("myapp", "desc", "https://github.com/test/repo", "", ProviderAWS),
 			wantErr: false,
 		},
 		{

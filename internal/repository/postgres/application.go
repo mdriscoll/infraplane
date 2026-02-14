@@ -23,9 +23,9 @@ func NewApplicationRepo(pool *pgxpool.Pool) *ApplicationRepo {
 
 func (r *ApplicationRepo) Create(ctx context.Context, app domain.Application) error {
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO applications (id, name, description, git_repo_url, provider, status, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		app.ID, app.Name, app.Description, app.GitRepoURL, app.Provider, app.Status, app.CreatedAt, app.UpdatedAt,
+		`INSERT INTO applications (id, name, description, git_repo_url, source_path, provider, status, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		app.ID, app.Name, app.Description, app.GitRepoURL, app.SourcePath, app.Provider, app.Status, app.CreatedAt, app.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert application: %w", err)
@@ -36,9 +36,9 @@ func (r *ApplicationRepo) Create(ctx context.Context, app domain.Application) er
 func (r *ApplicationRepo) GetByID(ctx context.Context, id uuid.UUID) (domain.Application, error) {
 	var app domain.Application
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, name, description, git_repo_url, provider, status, created_at, updated_at
+		`SELECT id, name, description, git_repo_url, source_path, provider, status, created_at, updated_at
 		 FROM applications WHERE id = $1`, id,
-	).Scan(&app.ID, &app.Name, &app.Description, &app.GitRepoURL, &app.Provider, &app.Status, &app.CreatedAt, &app.UpdatedAt)
+	).Scan(&app.ID, &app.Name, &app.Description, &app.GitRepoURL, &app.SourcePath, &app.Provider, &app.Status, &app.CreatedAt, &app.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return app, domain.ErrNotFound
@@ -51,9 +51,9 @@ func (r *ApplicationRepo) GetByID(ctx context.Context, id uuid.UUID) (domain.App
 func (r *ApplicationRepo) GetByName(ctx context.Context, name string) (domain.Application, error) {
 	var app domain.Application
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, name, description, git_repo_url, provider, status, created_at, updated_at
+		`SELECT id, name, description, git_repo_url, source_path, provider, status, created_at, updated_at
 		 FROM applications WHERE name = $1`, name,
-	).Scan(&app.ID, &app.Name, &app.Description, &app.GitRepoURL, &app.Provider, &app.Status, &app.CreatedAt, &app.UpdatedAt)
+	).Scan(&app.ID, &app.Name, &app.Description, &app.GitRepoURL, &app.SourcePath, &app.Provider, &app.Status, &app.CreatedAt, &app.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return app, domain.ErrNotFound
@@ -65,7 +65,7 @@ func (r *ApplicationRepo) GetByName(ctx context.Context, name string) (domain.Ap
 
 func (r *ApplicationRepo) List(ctx context.Context) ([]domain.Application, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, name, description, git_repo_url, provider, status, created_at, updated_at
+		`SELECT id, name, description, git_repo_url, source_path, provider, status, created_at, updated_at
 		 FROM applications ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -76,7 +76,7 @@ func (r *ApplicationRepo) List(ctx context.Context) ([]domain.Application, error
 	var apps []domain.Application
 	for rows.Next() {
 		var app domain.Application
-		if err := rows.Scan(&app.ID, &app.Name, &app.Description, &app.GitRepoURL, &app.Provider, &app.Status, &app.CreatedAt, &app.UpdatedAt); err != nil {
+		if err := rows.Scan(&app.ID, &app.Name, &app.Description, &app.GitRepoURL, &app.SourcePath, &app.Provider, &app.Status, &app.CreatedAt, &app.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan application: %w", err)
 		}
 		apps = append(apps, app)
@@ -87,9 +87,9 @@ func (r *ApplicationRepo) List(ctx context.Context) ([]domain.Application, error
 func (r *ApplicationRepo) Update(ctx context.Context, app domain.Application) error {
 	result, err := r.pool.Exec(ctx,
 		`UPDATE applications
-		 SET name = $2, description = $3, git_repo_url = $4, provider = $5, status = $6, updated_at = $7
+		 SET name = $2, description = $3, git_repo_url = $4, source_path = $5, provider = $6, status = $7, updated_at = $8
 		 WHERE id = $1`,
-		app.ID, app.Name, app.Description, app.GitRepoURL, app.Provider, app.Status, app.UpdatedAt,
+		app.ID, app.Name, app.Description, app.GitRepoURL, app.SourcePath, app.Provider, app.Status, app.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("update application: %w", err)

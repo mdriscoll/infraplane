@@ -20,7 +20,7 @@ func setupTestHandlers() *ToolHandlers {
 	planRepo := mock.NewPlanRepo()
 	mockLLM := &llm.MockClient{}
 
-	appSvc := service.NewApplicationService(appRepo)
+	appSvc := service.NewApplicationService(appRepo, resRepo, mockLLM)
 	resSvc := service.NewResourceService(resRepo, appRepo, mockLLM)
 	planSvc := service.NewPlannerService(planRepo, appRepo, resRepo, mockLLM)
 	depSvc := service.NewDeploymentService(depRepo, appRepo)

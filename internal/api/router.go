@@ -33,6 +33,9 @@ func NewRouter(
 		r.Get("/applications/{name}", h.GetApplication)
 		r.Delete("/applications/{name}", h.DeleteApplication)
 
+		// Reanalyze
+		r.Post("/applications/{name}/reanalyze", h.ReanalyzeSource)
+
 		// Resources
 		r.Post("/applications/{name}/resources", h.AddResource)
 		r.Get("/applications/{name}/resources", h.ListResources)
