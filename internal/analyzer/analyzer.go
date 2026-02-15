@@ -62,6 +62,12 @@ var infraGlobs = []string{
 	"k8s/*.yml",
 	"kubernetes/*.yaml",
 	"kubernetes/*.yml",
+	"deploy/*.sh",
+	"deploy/*.yaml",
+	"deploy/*.yml",
+	"scripts/*.sh",
+	".github/workflows/*.yml",
+	".github/workflows/*.yaml",
 }
 
 // IsGitURL returns true if the source looks like a git repository URL.

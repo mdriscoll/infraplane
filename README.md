@@ -1,340 +1,187 @@
 # Infraplane
 
-A cloud infrastructure abstraction platform that lets developers define and manage infrastructure through natural language via [Claude Code](https://claude.com/claude-code) and [MCP](https://modelcontextprotocol.io/) (Model Context Protocol). Infraplane provides a cloud-agnostic resource layer that makes applications easily deployable across AWS and GCP.
+**Describe your app. Get a cloud.**
 
-## What is Infraplane?
+Infraplane is a cloud infrastructure platform that turns natural language into production-ready infrastructure. Point it at your codebase, pick AWS or GCP, and get a complete hosting plan — with Terraform configs, cost estimates, and a full resource inventory — in under a minute.
 
-Infraplane sits between your application code and cloud providers. Instead of writing Terraform or CloudFormation by hand, you describe what your application needs in plain English — "I need a PostgreSQL database for user data" — and Infraplane's LLM engine (Claude Opus 4.6) translates that into concrete infrastructure definitions for your chosen cloud provider.
+It works two ways:
+- **Web dashboard** — a guided onboarding wizard and full management UI
+- **Claude Code + MCP** — infrastructure generation happens in real-time as you build
 
-### The Problem
+---
 
-- Developers spend significant time writing and maintaining infrastructure-as-code
-- Moving applications between cloud providers requires rewriting IaC from scratch
-- Infrastructure decisions are made in isolation from the application code being written
-- There's no single pane of glass for tracking what's deployed where
+## Quick Demo
 
-### The Solution
+```
+1. Browse to http://localhost:5173/onboard
+2. Choose AWS or GCP
+3. Select your project folder
+4. Wait ~60 seconds
+5. Get: detected resources, hosting plan, cost estimate, and per-resource Terraform HCL
+```
 
-Infraplane provides:
-- **Real-time IaC generation** as you build your application with Claude Code
-- **Cloud-agnostic resource abstraction** — define once, deploy to AWS or GCP
-- **LLM-powered infrastructure intelligence** — recommendations, hosting plans, and migration strategies
-- **A deployment dashboard** for visibility and control
+---
+
+## How It Works
+
+```
+Your Code ──► Infraplane Analyzer ──► LLM (Claude Sonnet 4.5) ──► Resources + Plan + Terraform
+                    │                         │
+                    │ Extracts infra files     │ Interprets needs,
+                    │ (Dockerfile, k8s,        │ maps to cloud services,
+                    │  Terraform, CI/CD...)     │ generates Terraform HCL
+                    │                         │
+                    ▼                         ▼
+              16 file types            Cloud-agnostic Resource model
+              auto-detected            with AWS + GCP provider mappings
+```
+
+When you register an application, Infraplane:
+
+1. **Scans** your codebase for infrastructure signals (Dockerfiles, `docker-compose.yml`, Kubernetes manifests, Terraform files, CI/CD workflows, `package.json`, `requirements.txt`, and more)
+2. **Analyzes** those files with an LLM to understand what your app actually needs
+3. **Creates** cloud-agnostic resources — a `database`, a `cache`, a `queue` — independent of any provider
+4. **Maps** each resource to concrete cloud services: RDS vs. Cloud SQL, ElastiCache vs. Memorystore
+5. **Generates** a hosting plan with architecture recommendations and monthly cost estimates
+6. **Produces** production-ready Terraform HCL for every resource, on demand
+
+---
+
+## Features
+
+### Onboarding Wizard
+A 4-step guided flow: pick a provider → browse your code → wait for analysis → get your full hosting plan with resources, costs, and Terraform configs.
+
+### Codebase Analysis
+The analyzer extracts 16+ infrastructure file types from your project and feeds them to the LLM for intelligent resource detection. No manual tagging required.
+
+### Per-Resource Terraform Generation
+Select any resource from your plan and generate production-ready Terraform HCL for your chosen provider. Copy to clipboard and deploy.
+
+### Live Resource Discovery
+Discover what's already running in your cloud account. Infraplane generates targeted CLI commands (`gcloud`, `aws`), executes them in a secure sandbox, and maps the results back to your application. Also supports GCP Cloud Asset Inventory for comprehensive project-wide scans.
+
+### Infrastructure Topology Graphs
+Visualize your application's infrastructure as an interactive directed graph — compute nodes, databases, caches, queues, and the edges between them — rendered with React Flow and dagre layout.
+
+### Hosting Plans & Cost Estimates
+LLM-generated architecture recommendations with monthly cost breakdowns by resource category (compute, database, storage, networking, etc.).
+
+### Migration Planning
+Generate a step-by-step plan to move your application between AWS and GCP, including service mappings, data migration strategies, and new Terraform configurations.
+
+### MCP Integration
+All features are available as MCP tools for Claude Code. Infraplane can run as an MCP server over stdio, so Claude Code can create resources, generate plans, and discover infrastructure in real-time as you build.
+
+---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     Claude Code                          │
-│              (Developer's AI assistant)                   │
-└──────────────────────┬──────────────────────────────────┘
-                       │ MCP (Model Context Protocol)
-                       │ stdio transport
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Infraplane Server                        │
-│                                                          │
-│  ┌──────────┐   ┌───────────┐   ┌─────────────────┐    │
-│  │ MCP      │   │ REST API  │   │ LLM Engine      │    │
-│  │ Server   │   │ (Dashboard│   │ (Claude Opus 4.6)│    │
-│  │ (Tools)  │   │  Backend) │   │                  │    │
-│  └────┬─────┘   └─────┬─────┘   └────────┬────────┘    │
-│       │               │                   │              │
-│       └───────────────┼───────────────────┘              │
-│                       │                                  │
-│              ┌────────▼────────┐                         │
-│              │  Service Layer  │                         │
-│              │  (Business      │                         │
-│              │   Logic)        │                         │
-│              └────────┬────────┘                         │
-│                       │                                  │
-│         ┌─────────────┼─────────────┐                    │
-│         ▼             ▼             ▼                    │
-│  ┌────────────┐ ┌──────────┐ ┌──────────┐              │
-│  │ PostgreSQL │ │ AWS      │ │ GCP      │              │
-│  │ Repository │ │ Adapter  │ │ Adapter  │              │
-│  └────────────┘ └──────────┘ └──────────┘              │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                      Claude Code                              │
+│               (MCP over stdio transport)                      │
+└────────────────────────┬─────────────────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────────────────┐
+│                   Infraplane Server                           │
+│                                                               │
+│   ┌────────────┐   ┌────────────┐   ┌──────────────────────┐ │
+│   │ MCP Server │   │  REST API  │   │    LLM Engine        │ │
+│   │ (11 tools) │   │ (18 endpts)│   │ (Claude Sonnet 4.5)  │ │
+│   └──────┬─────┘   └──────┬─────┘   └──────────┬───────────┘ │
+│          │                │                     │             │
+│          └────────────────┼─────────────────────┘             │
+│                           │                                   │
+│                  ┌────────▼────────┐                          │
+│                  │  Service Layer  │                          │
+│                  │  (6 services)   │                          │
+│                  └────────┬────────┘                          │
+│                           │                                   │
+│          ┌────────────────┼────────────────┐                  │
+│          ▼                ▼                ▼                  │
+│   ┌────────────┐   ┌──────────┐   ┌────────────┐            │
+│   │ PostgreSQL │   │ Analyzer │   │  Executor  │            │
+│   │ (pgx v5)   │   │ (16 file │   │ (secure    │            │
+│   │            │   │  types)  │   │  CLI runs) │            │
+│   └────────────┘   └──────────┘   └────────────┘            │
+│                                                               │
+│   ┌──────────────────────────────────────────────────────┐   │
+│   │  Provider Adapters: AWS │ GCP │ Terraform Generator  │   │
+│   └──────────────────────────────────────────────────────┘   │
+└───────────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────────┐
+│                    React Dashboard (Vite)                      │
+│  ┌─────────┐ ┌────────┐ ┌──────────┐ ┌────────┐ ┌─────────┐ │
+│  │ Onboard │ │  Apps   │ │ App      │ │ Deploy │ │Migration│ │
+│  │ Wizard  │ │  List   │ │ Detail   │ │ Board  │ │ Planner │ │
+│  └─────────┘ └────────┘ └──────────┘ └────────┘ └─────────┘ │
+│  ┌──────────────┐ ┌───────────────┐ ┌────────────────────┐   │
+│  │ InfraGraph   │ │ LiveResources │ │ Terraform Viewer   │   │
+│  │ (React Flow) │ │ Table         │ │ (per-resource HCL) │   │
+│  └──────────────┘ └───────────────┘ └────────────────────┘   │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ### Tech Stack
 
-| Component | Technology |
-|-----------|-----------|
-| Backend | Go 1.26+ |
+| Layer | Technology |
+|-------|-----------|
+| Backend | Go 1.26 |
 | Database | PostgreSQL 16 |
-| Frontend | React + TypeScript (Vite) |
-| LLM | Claude Opus 4.6 via Anthropic API |
-| MCP SDK | [mcp-go](https://github.com/mark3labs/mcp-go) |
+| Frontend | React 19, TypeScript, Tailwind CSS |
+| Build | Vite 6 |
+| LLM | Claude Sonnet 4.5 via Anthropic API |
+| MCP | [mcp-go](https://github.com/mark3labs/mcp-go) v0.43 |
 | DB Driver | [pgx](https://github.com/jackc/pgx) v5 |
-| HTTP Router | [chi](https://github.com/go-chi/chi) v5 |
+| Router | [chi](https://github.com/go-chi/chi) v5 |
 | Migrations | [golang-migrate](https://github.com/golang-migrate/migrate) v4 |
-| Integration Tests | [testcontainers-go](https://github.com/testcontainers/testcontainers-go) |
-| Container Runtime | [Colima](https://github.com/abiosoft/colima) (Docker-compatible) |
+| State | [TanStack Query](https://tanstack.com/query) v5 |
+| Graphs | [React Flow](https://reactflow.dev/) + [dagre](https://github.com/dagrejs/dagre) |
+| Testing | [testcontainers-go](https://github.com/testcontainers/testcontainers-go), Vitest |
+| Container Runtime | [Colima](https://github.com/abiosoft/colima) |
 
-## User Journeys
-
-### 1. Real-Time Infrastructure Generation
-
-While you build your application with Claude Code, Infraplane defines infrastructure on-the-fly:
-
-```
-You: "I need a PostgreSQL database for user data"
-Claude Code → MCP → Infraplane:
-  → LLM analyzes the request
-  → Creates abstract Resource(kind=database, spec={engine: postgres})
-  → Generates provider mappings:
-      AWS → RDS (db.t3.micro, PostgreSQL 16)
-      GCP → Cloud SQL (db-f1-micro, PostgreSQL 16)
-  → Returns confirmation with both provider options
-```
-
-### 2. Application Registry
-
-List all registered applications with deployment status, provider, and latest git commit:
-
-```
-$ infraplane list-applications
-
-NAME          PROVIDER  STATUS      LATEST DEPLOY  BRANCH
-my-api        aws       deployed    abc123f        main
-frontend-app  gcp       provisioned -              -
-new-service   aws       draft       -              -
-```
-
-### 3. Deployment Dashboard
-
-A React-based web dashboard where you can:
-- View all registered applications and their resources
-- Deploy the latest commit from `main` or any branch
-- View deployment history with Terraform plans
-- Monitor deployment status in real-time
-
-### 4. Cloud Migration Planning
-
-Request a migration plan to move your application between providers:
-
-```
-You: "Generate a plan to migrate my-api from AWS to GCP"
-Infraplane:
-  → Analyzes all resources (RDS → Cloud SQL, S3 → Cloud Storage, etc.)
-  → Generates step-by-step migration plan
-  → Estimates cost differences
-  → Produces new Terraform configurations for the target provider
-```
-
-### 5. Hosting Recommendations
-
-As you build, Infraplane analyzes your application's resource requirements and suggests optimal hosting strategies:
-
-```
-You: "What's the best way to deploy this application?"
-Infraplane:
-  → Analyzes your resources (database, cache, compute, CDN)
-  → Recommends architecture (ECS Fargate vs. EKS vs. Lambda)
-  → Provides estimated monthly costs
-  → Generates complete Terraform configuration
-```
-
-## Project Structure
-
-```
-infraplane/
-├── cmd/
-│   └── infraplane/
-│       └── main.go                 # Entry point: MCP server + REST API
-├── internal/
-│   ├── domain/                     # Core domain models (zero external deps)
-│   │   ├── application.go          # Application entity
-│   │   ├── resource.go             # Cloud-agnostic resource abstraction
-│   │   ├── deployment.go           # Deployment tracking
-│   │   ├── plan.go                 # Infrastructure & migration plans
-│   │   ├── provider.go             # Cloud provider enum (AWS, GCP)
-│   │   ├── errors.go               # Domain error types
-│   │   └── domain_test.go          # 29 unit tests for all domain logic
-│   ├── llm/                        # LLM integration (Claude Opus 4.6)
-│   │   ├── client.go               # Anthropic API client wrapper
-│   │   ├── prompts.go              # Prompt templates for reasoning tasks
-│   │   └── prompts/                # Long-form prompt templates (.txt)
-│   ├── service/                    # Business logic layer
-│   │   ├── application.go          # App CRUD operations
-│   │   ├── resource.go             # Resource management + LLM analysis
-│   │   ├── deployment.go           # Deployment orchestration
-│   │   └── planner.go              # LLM-powered hosting & migration planning
-│   ├── repository/                 # Data access layer
-│   │   ├── interfaces.go           # Repository interfaces (ports)
-│   │   ├── postgres/               # PostgreSQL implementations
-│   │   │   ├── db.go               # Connection pool setup
-│   │   │   ├── application.go      # Application CRUD
-│   │   │   ├── resource.go         # Resource CRUD with JSONB
-│   │   │   ├── deployment.go       # Deployment tracking
-│   │   │   ├── plan.go             # Plan storage
-│   │   │   ├── testhelper_test.go   # Testcontainers setup
-│   │   │   └── *_test.go           # 25 integration tests
-│   │   └── mock/                   # In-memory mocks for unit testing
-│   │       ├── repositories.go     # All 4 mock repos
-│   │       └── repositories_test.go # 4 CRUD test suites
-│   ├── provider/                   # Cloud provider adapters
-│   │   ├── adapter.go              # CloudProviderAdapter interface
-│   │   ├── aws/                    # AWS implementation
-│   │   ├── gcp/                    # GCP implementation
-│   │   └── terraform/              # Terraform HCL generation
-│   ├── mcp/                        # MCP server + tool definitions
-│   │   ├── server.go               # MCP server setup
-│   │   └── tools.go                # Tool handler implementations
-│   └── api/                        # REST API for dashboard
-│       ├── router.go               # HTTP router
-│       ├── handlers.go             # REST handlers
-│       └── middleware.go           # Auth, CORS, logging
-├── migrations/                     # PostgreSQL schema migrations
-│   ├── 001_create_applications.*   # Applications table
-│   ├── 002_create_resources.*      # Resources table (JSONB specs)
-│   ├── 003_create_deployments.*    # Deployment tracking
-│   └── 004_create_plans.*          # Infrastructure plans
-├── web/                            # React + TypeScript frontend
-│   └── src/
-│       ├── pages/                  # Dashboard pages
-│       ├── components/             # UI components
-│       └── api/                    # API client
-├── docker-compose.yml              # PostgreSQL for local dev
-├── Makefile                        # Build, test, and dev commands
-├── go.mod
-└── .env.example                    # Environment variable template
-```
-
-## Core Domain Model
-
-### The Resource Abstraction
-
-The key innovation is the **cloud-agnostic resource model**. When a developer says "I need a database," Infraplane creates an abstract `Resource` that maps to concrete cloud services:
-
-```go
-// A developer says: "I need a PostgreSQL database for user data"
-// Infraplane creates:
-Resource{
-    Kind: "database",
-    Name: "user-db",
-    Spec: {"engine": "postgres", "version": "16"},
-    ProviderMappings: {
-        "aws": {
-            ServiceName:  "RDS",
-            Config:       {"instance_class": "db.t3.micro"},
-            TerraformHCL: "resource \"aws_db_instance\" ...",
-        },
-        "gcp": {
-            ServiceName:  "Cloud SQL",
-            Config:       {"tier": "db-f1-micro"},
-            TerraformHCL: "resource \"google_sql_database_instance\" ...",
-        },
-    },
-}
-```
-
-### Supported Resource Kinds
-
-| Kind | AWS Service | GCP Service |
-|------|-----------|-------------|
-| `database` | RDS, Aurora, DynamoDB | Cloud SQL, Firestore, Spanner |
-| `compute` | ECS, EKS, Lambda, EC2 | Cloud Run, GKE, Cloud Functions |
-| `storage` | S3 | Cloud Storage |
-| `cache` | ElastiCache | Memorystore |
-| `queue` | SQS, SNS | Pub/Sub, Cloud Tasks |
-| `cdn` | CloudFront | Cloud CDN |
-| `network` | VPC, ALB | VPC, Cloud Load Balancing |
-
-### Entity Relationships
-
-```
-Application (1) ──── (N) Resource
-     │                      │
-     │                      └── ProviderMappings (AWS, GCP configs + Terraform)
-     │
-     ├──── (N) Deployment (tracks git commit, status, Terraform plan)
-     │
-     └──── (N) InfrastructurePlan (hosting or migration, LLM-generated)
-```
-
-## MCP Tools
-
-Infraplane exposes the following tools via MCP for Claude Code to call:
-
-| Tool | Description | LLM-Powered |
-|------|-------------|:-----------:|
-| `register_application` | Register a new app with name, git repo, preferred provider | |
-| `add_resource` | Describe a resource need in natural language; LLM maps to cloud services | Yes |
-| `remove_resource` | Remove a resource from an application | |
-| `list_applications` | List all registered applications with status | |
-| `get_application` | Get detailed app info including all resources | |
-| `get_hosting_plan` | LLM analyzes app + resources, recommends hosting strategy | Yes |
-| `plan_migration` | LLM generates migration plan between cloud providers | Yes |
-| `deploy` | Trigger deployment to a provider from a git branch/commit | |
-| `get_deployment_status` | Check deployment progress and history | |
-
-## LLM Integration
-
-Infraplane uses Claude Opus 4.6 as its reasoning engine for all "smart" operations:
-
-### How It Works
-
-1. **Resource Analysis**: When a developer describes an infrastructure need, the LLM interprets the natural language, identifies the resource kind, generates a specification, and maps it to concrete cloud services with Terraform.
-
-2. **Hosting Plans**: The LLM analyzes all resources for an application and recommends an optimal deployment architecture, considering cost, performance, reliability, and scalability.
-
-3. **Migration Plans**: Given a source and target provider, the LLM generates a step-by-step migration plan with service mappings, data migration strategies, and new Terraform configurations.
-
-4. **Terraform Generation**: All IaC is generated by the LLM as Terraform HCL, ensuring it follows best practices for the target provider.
-
-### Configuration
-
-Set the `ANTHROPIC_API_KEY` environment variable:
-
-```bash
-cp .env.example .env
-# Edit .env and add your Anthropic API key
-```
+---
 
 ## Getting Started
 
 ### Prerequisites
 
-- **Go 1.26+**: `brew install go`
-- **Colima** (Docker runtime): `brew install colima docker`
-- **Node.js 20+** (for frontend): `brew install node`
-- **Anthropic API Key**: Required for LLM-powered features
+- **Go 1.26+** — `brew install go`
+- **Node.js 20+** — `brew install node`
+- **Colima** (Docker runtime) — `brew install colima docker`
+- **Anthropic API Key** — for LLM features
 
 ### Quick Start
 
 ```bash
-# 1. Clone the repository
+# Clone
 git clone https://github.com/matthewdriscoll/infraplane.git
 cd infraplane
 
-# 2. Copy environment template
+# Environment
 cp .env.example .env
-# Edit .env with your ANTHROPIC_API_KEY
+# Add your ANTHROPIC_API_KEY to .env
 
-# 3. Start Colima (Docker runtime)
+# Start Docker + PostgreSQL
 colima start --cpu 2 --memory 4
-
-# 4. Start PostgreSQL
 docker compose up -d postgres
 
-# 5. Install Go dependencies
+# Backend
 make deps
-
-# 6. Run database migrations
 make migrate
+make dev          # Starts on :8080
 
-# 7. Start the server
-make dev
+# Frontend (separate terminal)
+make web          # Starts on :5173
 ```
 
-### Connecting to Claude Code
+Open [http://localhost:5173/onboard](http://localhost:5173/onboard) to try the onboarding wizard.
 
-Once the MCP server is running, configure Claude Code to connect:
+### Connecting Claude Code via MCP
 
 ```json
-// In your Claude Code MCP settings
 {
   "mcpServers": {
     "infraplane": {
@@ -349,169 +196,223 @@ Once the MCP server is running, configure Claude Code to connect:
 }
 ```
 
+---
+
+## REST API
+
+All endpoints are prefixed with `/api`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/applications/onboard` | Full onboarding: register + analyze + plan |
+| `POST` | `/applications` | Register an application |
+| `GET` | `/applications` | List all applications |
+| `GET` | `/applications/{name}` | Get application details |
+| `DELETE` | `/applications/{name}` | Delete an application |
+| `POST` | `/applications/{name}/reanalyze` | Re-analyze source code |
+| `POST` | `/applications/{name}/analyze-upload` | Analyze uploaded files |
+| `POST` | `/applications/{name}/resources` | Add a resource (LLM-powered) |
+| `GET` | `/applications/{name}/resources` | List resources |
+| `DELETE` | `/resources/{id}` | Remove a resource |
+| `POST` | `/resources/{id}/terraform` | Generate Terraform HCL |
+| `POST` | `/applications/{name}/hosting-plan` | Generate hosting plan |
+| `POST` | `/applications/{name}/migration-plan` | Generate migration plan |
+| `GET` | `/applications/{name}/plans` | List plans |
+| `POST` | `/applications/{name}/graph` | Generate infrastructure graph |
+| `GET` | `/applications/{name}/graph` | Get latest graph |
+| `POST` | `/applications/{name}/live-resources` | Discover live resources |
+| `POST` | `/applications/{name}/deploy` | Deploy application |
+| `GET` | `/applications/{name}/deployments` | List deployments |
+| `GET` | `/deployments/{id}` | Get deployment status |
+| `GET` | `/health` | Health check |
+
+---
+
+## MCP Tools
+
+11 tools available when running as an MCP server:
+
+| Tool | Description | LLM |
+|------|-------------|:---:|
+| `register_application` | Register app with auto-detection from source path | ✦ |
+| `list_applications` | List all registered applications | |
+| `get_application` | Get app details with resources | |
+| `add_resource` | Describe a resource in natural language | ✦ |
+| `remove_resource` | Remove a resource | |
+| `get_hosting_plan` | Generate hosting plan with cost estimates | ✦ |
+| `plan_migration` | Generate cross-provider migration plan | ✦ |
+| `deploy` | Trigger deployment | |
+| `get_deployment_status` | Check deployment status | |
+| `generate_graph` | Generate infrastructure topology graph | ✦ |
+| `discover_live_resources` | Discover running cloud resources | ✦ |
+
+✦ = LLM-powered operation
+
+---
+
+## Core Domain Model
+
+### The Resource Abstraction
+
+The central concept is a cloud-agnostic `Resource`. When you say "I need a PostgreSQL database," Infraplane creates:
+
+```go
+Resource{
+    Kind: "database",
+    Name: "user-db",
+    Spec: {"engine": "postgres", "version": "16"},
+    ProviderMappings: {
+        "aws": {ServiceName: "RDS",       Config: {"instance_class": "db.t3.micro"}},
+        "gcp": {ServiceName: "Cloud SQL", Config: {"tier": "db-f1-micro"}},
+    },
+}
+```
+
+Each resource maps to concrete services on both providers. Terraform HCL is generated on demand per resource.
+
+### Supported Resource Kinds
+
+| Kind | AWS | GCP |
+|------|-----|-----|
+| `compute` | ECS, EKS, Lambda, EC2 | Cloud Run, GKE, Cloud Functions |
+| `database` | RDS, Aurora, DynamoDB | Cloud SQL, Firestore, Spanner |
+| `storage` | S3 | Cloud Storage |
+| `cache` | ElastiCache | Memorystore |
+| `queue` | SQS, SNS | Pub/Sub, Cloud Tasks |
+| `cdn` | CloudFront | Cloud CDN |
+| `network` | VPC, ALB | VPC, Cloud Load Balancing |
+| `secrets` | Secrets Manager, SSM | Secret Manager |
+| `policy` | IAM Roles & Policies | IAM Service Accounts & Bindings |
+
+### Entity Relationships
+
+```
+Application ──┬── Resources ── ProviderMappings (AWS + GCP)
+              ├── Deployments (git commit, status, Terraform plan)
+              ├── InfrastructurePlans (hosting or migration, cost estimates)
+              └── InfraGraphs (topology: nodes + edges)
+```
+
+---
+
+## Project Structure
+
+```
+infraplane/
+├── cmd/infraplane/main.go              # Entry point: MCP or HTTP mode
+├── internal/
+│   ├── domain/                         # Core models (zero external deps)
+│   │   ├── application.go              # Application entity + status enum
+│   │   ├── resource.go                 # Cloud-agnostic resource model
+│   │   ├── deployment.go               # Deployment tracking
+│   │   ├── plan.go                     # Infrastructure plans + cost estimates
+│   │   ├── graph.go                    # Topology graph (nodes + edges)
+│   │   ├── live_resource.go            # Live cloud resource tracking
+│   │   ├── provider.go                 # Cloud provider enum
+│   │   └── errors.go                   # Domain error types
+│   ├── llm/                            # LLM integration
+│   │   ├── anthropic.go                # Anthropic SDK client (Sonnet 4.5)
+│   │   ├── client.go                   # Client interface
+│   │   ├── prompts.go                  # Prompt templates (7+ tasks)
+│   │   └── mock.go                     # Mock client for tests
+│   ├── service/                        # Business logic (6 services)
+│   │   ├── application.go              # CRUD + auto-detect + onboarding
+│   │   ├── resource.go                 # LLM-powered resource management
+│   │   ├── planner.go                  # Hosting + migration planning
+│   │   ├── graph.go                    # Topology graph generation
+│   │   ├── discovery.go                # Live resource discovery
+│   │   └── deployment.go               # Deployment orchestration
+│   ├── repository/                     # Data access layer
+│   │   ├── interfaces.go               # Repository interfaces
+│   │   ├── postgres/                   # PostgreSQL implementations (pgx v5)
+│   │   └── mock/                       # In-memory mocks for unit tests
+│   ├── analyzer/                       # Codebase analyzer (16+ file types)
+│   ├── executor/                       # Secure CLI executor (read-only)
+│   ├── cloud/gcp/                      # GCP Cloud Asset Inventory
+│   ├── provider/                       # Cloud provider adapters
+│   │   ├── aws/                        # AWS adapter
+│   │   ├── gcp/                        # GCP adapter
+│   │   └── terraform/                  # Terraform HCL generator
+│   ├── mcp/                            # MCP server (11 tools)
+│   └── api/                            # REST API (18 endpoints, chi router)
+├── migrations/                         # 6 PostgreSQL migrations
+├── web/                                # React + TypeScript frontend
+│   ├── src/pages/                      # 5 pages
+│   ├── src/components/                 # 6 components
+│   ├── src/api/client.ts               # API client
+│   ├── src/hooks/useApi.ts             # TanStack Query hooks
+│   └── src/lib/directoryPicker.ts      # File System Access API
+├── docker-compose.yml                  # PostgreSQL for local dev
+├── Makefile                            # Build, test, dev commands
+└── .env.example                        # Environment template
+```
+
+---
+
 ## Development
 
-### Makefile Commands
+### Make Commands
 
 | Command | Description |
 |---------|-------------|
-| `make build` | Build the binary to `bin/infraplane` |
-| `make dev` | Start PostgreSQL + run the server |
-| `make test` | Run unit tests only (fast, no Docker needed) |
-| `make test-integration` | Run integration tests (requires Colima/Docker) |
-| `make test-all` | Run all tests |
+| `make build` | Build binary to `bin/infraplane` |
+| `make dev` | Start PostgreSQL + run server |
+| `make test` | Unit tests (fast, no Docker) |
+| `make test-integration` | Integration tests (requires Colima) |
+| `make test-all` | All tests |
 | `make migrate` | Run database migrations |
 | `make migrate-down` | Rollback last migration |
 | `make web` | Start frontend dev server |
 | `make fmt` | Format and vet Go code |
-| `make deps` | Install/tidy Go dependencies |
+| `make deps` | Tidy Go dependencies |
 | `make clean` | Remove build artifacts |
 
-### Running Tests
+### Testing
 
 ```bash
-# Unit tests only (fast, no Docker needed)
-make test
-
-# Integration tests (spins up PostgreSQL via testcontainers)
-make test-integration
-
-# All tests
-make test-all
+make test              # Unit tests — fast, no Docker
+make test-integration  # Integration tests — needs Colima running
+make test-all          # Everything
 ```
 
-### Test Architecture
-
-The project follows strict TDD with two test layers:
-
-**Unit Tests** (`-short` flag skips integration):
-- Domain model validation (table-driven tests)
-- Mock repository CRUD operations
-- Service layer logic (with mock repos + mock LLM client)
-- MCP tool handlers (with mock services)
-
-**Integration Tests** (`-run Integration`):
-- PostgreSQL repositories tested against real database via [testcontainers-go](https://github.com/testcontainers/testcontainers-go)
-- Each test suite spins up a fresh Postgres container, runs migrations, executes tests, and tears down
-- MCP end-to-end tests (in-process client/server with real service + test DB)
-
-### Database Migrations
-
-Migrations live in `migrations/` and are managed by [golang-migrate](https://github.com/golang-migrate/migrate):
-
-```
-migrations/
-├── 001_create_applications.up.sql    # Applications table
-├── 001_create_applications.down.sql
-├── 002_create_resources.up.sql       # Resources with JSONB specs
-├── 002_create_resources.down.sql
-├── 003_create_deployments.up.sql     # Deployment tracking
-├── 003_create_deployments.down.sql
-├── 004_create_plans.up.sql           # Infrastructure plans
-└── 004_create_plans.down.sql
-```
-
-Key schema decisions:
-- **JSONB columns** for resource specs and provider mappings — flexible schema for diverse resource types
-- **UUID primary keys** — globally unique, safe for distributed systems
-- **Cascading deletes** on resources when an application is deleted
-- **Indexed foreign keys** for efficient lookups
-
-### Docker / Colima Setup
-
-This project uses Colima as a lightweight Docker alternative on macOS:
-
-```bash
-# Install
-brew install colima docker
-
-# Start (2 CPUs, 4GB RAM)
-colima start --cpu 2 --memory 4
-
-# Verify
-docker info
-```
-
-Testcontainers require the `TESTCONTAINERS_RYUK_DISABLED=true` environment variable when using Colima (the Makefile handles this automatically).
-
-## Implementation Roadmap
-
-### Phase 1: Foundation (Complete)
-- [x] Project scaffolding (Go module, Makefile, Docker Compose)
-- [x] Domain models (Application, Resource, Deployment, InfrastructurePlan)
-- [x] Cloud-agnostic resource abstraction with provider mappings
-- [x] PostgreSQL migrations for all tables
-- [x] Repository interfaces + PostgreSQL implementations
-- [x] Mock repositories for unit testing
-- [x] Integration tests with testcontainers-go (25 tests)
-- [x] Unit tests for domain models (29 tests)
-
-### Phase 2: LLM Integration
-- [ ] Anthropic API client wrapper (Claude Opus 4.6)
-- [ ] Prompt templates for resource analysis, hosting plans, migration plans
-- [ ] Structured output parsing (JSON from LLM responses)
-- [ ] Unit tests with mocked HTTP responses
-- [ ] LLM client interface + mock for service testing
-
-### Phase 3: Services + MCP Server
-- [ ] Application service (CRUD operations)
-- [ ] Resource service (add/remove + LLM-powered analysis)
-- [ ] Planner service (hosting and migration plans)
-- [ ] MCP server with all 9 tools registered
-- [ ] MCP integration tests (in-process client/server)
-
-### Phase 4: REST API
-- [ ] REST endpoints mirroring MCP tools
-- [ ] CORS, logging, error handling middleware
-- [ ] API integration tests
-
-### Phase 5: Deployment Service
-- [ ] Terraform generation via LLM
-- [ ] AWS adapter (credential validation, Terraform apply)
-- [ ] GCP adapter (credential validation, Terraform apply)
-- [ ] Deployment orchestration service
-- [ ] Provider adapter tests
-
-### Phase 6: Frontend
-- [ ] React app scaffolding (Vite, Router, TanStack Query, Tailwind)
-- [ ] Application list and detail pages
-- [ ] Deployment dashboard with branch selection
-- [ ] Migration planner page
-- [ ] Frontend component tests
-
-## Configuration
+**Unit tests** use mock repositories and a mock LLM client. **Integration tests** spin up real PostgreSQL containers via testcontainers-go, run migrations, execute tests, and tear down.
 
 ### Environment Variables
 
 | Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DATABASE_URL` | Yes | - | PostgreSQL connection string |
-| `ANTHROPIC_API_KEY` | Yes | - | Anthropic API key for Claude Opus 4.6 |
-| `PORT` | No | `8080` | REST API server port |
+|----------|:--------:|---------|-------------|
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
+| `ANTHROPIC_API_KEY` | Yes | — | Anthropic API key |
+| `PORT` | No | `8080` | REST API port |
 | `MCP_MODE` | No | `stdio` | MCP transport mode |
 
-### Example `.env`
+### Database
+
+6 migrations manage the schema:
+
+| Migration | Table |
+|-----------|-------|
+| 001 | `applications` |
+| 002 | `resources` (JSONB specs + provider mappings) |
+| 003 | `deployments` |
+| 004 | `plans` (hosting/migration + cost estimates) |
+| 005 | `source_path` column on applications |
+| 006 | `graphs` (topology nodes + edges) |
+
+Key decisions: UUID primary keys, JSONB for flexible schemas, cascading deletes from application → resources, indexed foreign keys.
+
+### Docker / Colima
 
 ```bash
-DATABASE_URL=postgres://infraplane:infraplane@localhost:5432/infraplane?sslmode=disable
-ANTHROPIC_API_KEY=sk-ant-xxxxx
-PORT=8080
-MCP_MODE=stdio
+brew install colima docker
+colima start --cpu 2 --memory 4
+docker compose up -d postgres
 ```
 
-## Contributing
+Testcontainers need `TESTCONTAINERS_RYUK_DISABLED=true` under Colima — the Makefile sets this automatically.
 
-This project uses test-driven development. Every feature must have:
-- **Unit tests** for business logic (using mock repositories and mock LLM client)
-- **Integration tests** for cross-domain flows (using testcontainers-go for PostgreSQL)
-
-Before submitting a PR:
-```bash
-make fmt          # Format and vet
-make test         # Unit tests pass
-make test-integration  # Integration tests pass
-```
+---
 
 ## License
 
-TBD
+MIT

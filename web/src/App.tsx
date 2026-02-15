@@ -3,6 +3,7 @@ import ApplicationList from './pages/ApplicationList'
 import ApplicationDetail from './pages/ApplicationDetail'
 import DeploymentDashboard from './pages/DeploymentDashboard'
 import MigrationPlanner from './pages/MigrationPlanner'
+import OnboardWizard from './pages/OnboardWizard'
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -22,6 +23,9 @@ function Layout({ children }: { children: React.ReactNode }) {
             <Link to="/migrate" className="text-gray-600 hover:text-gray-900">
               Migration
             </Link>
+            <Link to="/onboard" className="text-indigo-600 font-medium hover:text-indigo-800">
+              Onboard
+            </Link>
           </div>
         </div>
       </nav>
@@ -40,6 +44,7 @@ export default function App() {
         <Route path="/applications/:name" element={<ApplicationDetail />} />
         <Route path="/deployments" element={<DeploymentDashboard />} />
         <Route path="/migrate" element={<MigrationPlanner />} />
+        <Route path="/onboard" element={<OnboardWizard />} />
       </Routes>
     </Layout>
   )

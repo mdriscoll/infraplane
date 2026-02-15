@@ -246,3 +246,51 @@ func (r *PlanRepo) ListByApplicationID(_ context.Context, appID uuid.UUID) ([]do
 	}
 	return plans, nil
 }
+
+// GraphRepo is an in-memory mock implementation of repository.GraphRepo.
+type GraphRepo struct {
+	mu     sync.RWMutex
+	graphs map[uuid.UUID]domain.InfraGraph
+}
+
+func NewGraphRepo() *GraphRepo {
+	return &GraphRepo{graphs: make(map[uuid.UUID]domain.InfraGraph)}
+}
+
+func (r *GraphRepo) Create(_ context.Context, g domain.InfraGraph) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.graphs[g.ID] = g
+	return nil
+}
+
+func (r *GraphRepo) GetLatestByApplicationID(_ context.Context, appID uuid.UUID) (domain.InfraGraph, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var latest domain.InfraGraph
+	found := false
+	for _, g := range r.graphs {
+		if g.ApplicationID == appID {
+			if !found || g.CreatedAt.After(latest.CreatedAt) {
+				latest = g
+				found = true
+			}
+		}
+	}
+	if !found {
+		return latest, domain.ErrNotFound
+	}
+	return latest, nil
+}
+
+func (r *GraphRepo) ListByApplicationID(_ context.Context, appID uuid.UUID) ([]domain.InfraGraph, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var graphs []domain.InfraGraph
+	for _, g := range r.graphs {
+		if g.ApplicationID == appID {
+			graphs = append(graphs, g)
+		}
+	}
+	return graphs, nil
+}

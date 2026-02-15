@@ -59,10 +59,54 @@ export interface CostEstimate {
   breakdown: Record<string, number>
 }
 
+export interface GraphNode {
+  id: string
+  label: string
+  kind: 'internet' | 'compute' | 'database' | 'cache' | 'queue' | 'storage' | 'cdn' | 'network' | 'secrets' | 'policy'
+  service: string
+}
+
+export interface GraphEdge {
+  id: string
+  source: string
+  target: string
+  label: string
+}
+
+export interface InfraGraph {
+  id: string
+  application_id: string
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  created_at: string
+}
+
+export interface LiveResource {
+  resource_type: string
+  name: string
+  provider: 'aws' | 'gcp'
+  region: string
+  status: 'active' | 'provisioning' | 'stopped' | 'error' | 'unknown'
+  details: Record<string, string>
+  last_checked: string
+}
+
+export interface LiveResourceResult {
+  resources: LiveResource[]
+  errors?: string[]
+  timestamp: string
+}
+
 export interface ApplicationDetail {
   application: Application
   resources: Resource[]
   latest_deployment?: Deployment
+}
+
+export interface OnboardResult {
+  application: Application
+  resources: Resource[]
+  plan: InfrastructurePlan
 }
 
 // --- API Client ---
@@ -95,10 +139,28 @@ export const registerApplication = (data: {
   git_repo_url?: string
   source_path?: string
   provider: string
+  files?: { path: string; content: string }[]
 }) => request<Application>('/applications', { method: 'POST', body: JSON.stringify(data) })
+
+export const onboardApplication = (data: {
+  name: string
+  description?: string
+  provider: string
+  source_path?: string
+  files?: { path: string; content: string }[]
+}) => request<OnboardResult>('/applications/onboard', {
+  method: 'POST',
+  body: JSON.stringify(data),
+})
 
 export const reanalyzeSource = (appName: string) =>
   request<void>(`/applications/${appName}/reanalyze`, { method: 'POST' })
+
+export const analyzeUpload = (appName: string, files: { path: string; content: string }[]) =>
+  request<void>(`/applications/${appName}/analyze-upload`, {
+    method: 'POST',
+    body: JSON.stringify({ files }),
+  })
 
 export const deleteApplication = (name: string) =>
   request<void>(`/applications/${name}`, { method: 'DELETE' })
@@ -129,6 +191,13 @@ export const generateMigrationPlan = (appName: string, fromProvider: string, toP
 export const listPlans = (appName: string) =>
   request<InfrastructurePlan[]>(`/applications/${appName}/plans`)
 
+// Terraform HCL
+export const generateTerraformHCL = (resourceId: string, provider: string) =>
+  request<{ hcl: string }>(`/resources/${resourceId}/terraform`, {
+    method: 'POST',
+    body: JSON.stringify({ provider }),
+  })
+
 // Deployments
 export const deploy = (appName: string, gitBranch: string, gitCommit?: string) =>
   request<Deployment>(`/applications/${appName}/deploy`, {
@@ -144,3 +213,14 @@ export const getLatestDeployment = (appName: string) =>
 
 export const getDeploymentStatus = (deploymentId: string) =>
   request<Deployment>(`/deployments/${deploymentId}`)
+
+// Graphs
+export const generateGraph = (appName: string) =>
+  request<InfraGraph>(`/applications/${appName}/graph`, { method: 'POST' })
+
+export const getLatestGraph = (appName: string) =>
+  request<InfraGraph>(`/applications/${appName}/graph`)
+
+// Live Resources
+export const getLiveResources = (appName: string) =>
+  request<LiveResourceResult>(`/applications/${appName}/live-resources`, { method: 'POST' })

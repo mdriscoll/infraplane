@@ -41,3 +41,10 @@ type PlanRepo interface {
 	GetByID(ctx context.Context, id uuid.UUID) (domain.InfrastructurePlan, error)
 	ListByApplicationID(ctx context.Context, appID uuid.UUID) ([]domain.InfrastructurePlan, error)
 }
+
+// GraphRepo defines data access for infrastructure topology graphs.
+type GraphRepo interface {
+	Create(ctx context.Context, g domain.InfraGraph) error
+	GetLatestByApplicationID(ctx context.Context, appID uuid.UUID) (domain.InfraGraph, error)
+	ListByApplicationID(ctx context.Context, appID uuid.UUID) ([]domain.InfraGraph, error)
+}

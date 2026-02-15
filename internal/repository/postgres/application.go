@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 )
@@ -28,6 +29,10 @@ func (r *ApplicationRepo) Create(ctx context.Context, app domain.Application) er
 		app.ID, app.Name, app.Description, app.GitRepoURL, app.SourcePath, app.Provider, app.Status, app.CreatedAt, app.UpdatedAt,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.ErrConflict
+		}
 		return fmt.Errorf("insert application: %w", err)
 	}
 	return nil

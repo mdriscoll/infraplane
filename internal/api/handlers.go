@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/matthewdriscoll/infraplane/internal/analyzer"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 	"github.com/matthewdriscoll/infraplane/internal/service"
 )
@@ -17,6 +18,8 @@ type Handlers struct {
 	resources   *service.ResourceService
 	planner     *service.PlannerService
 	deployments *service.DeploymentService
+	graphs      *service.GraphService
+	discovery   *service.DiscoveryService
 }
 
 // NewHandlers creates a new Handlers.
@@ -25,23 +28,32 @@ func NewHandlers(
 	resources *service.ResourceService,
 	planner *service.PlannerService,
 	deployments *service.DeploymentService,
+	graphs *service.GraphService,
+	discovery *service.DiscoveryService,
 ) *Handlers {
 	return &Handlers{
 		apps:        apps,
 		resources:   resources,
 		planner:     planner,
 		deployments: deployments,
+		graphs:      graphs,
+		discovery:   discovery,
 	}
 }
 
 // --- Request/Response Types ---
 
 type registerAppRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	GitRepoURL  string `json:"git_repo_url"`
-	SourcePath  string `json:"source_path"`
-	Provider    string `json:"provider"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	GitRepoURL  string                 `json:"git_repo_url"`
+	SourcePath  string                 `json:"source_path"`
+	Provider    string                 `json:"provider"`
+	Files       []analyzer.FileContent `json:"files,omitempty"`
+}
+
+type analyzeUploadRequest struct {
+	Files []analyzer.FileContent `json:"files"`
 }
 
 type addResourceRequest struct {
@@ -58,6 +70,14 @@ type deployRequest struct {
 	GitCommit string `json:"git_commit"`
 }
 
+type onboardRequest struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Provider    string                 `json:"provider"`
+	SourcePath  string                 `json:"source_path"`
+	Files       []analyzer.FileContent `json:"files,omitempty"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -71,13 +91,64 @@ func (h *Handlers) RegisterApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app, err := h.apps.Register(r.Context(), req.Name, req.Description, req.GitRepoURL, req.SourcePath, domain.CloudProvider(req.Provider))
+	var opts *service.RegisterOpts
+	if len(req.Files) > 0 {
+		opts = &service.RegisterOpts{
+			UploadedFiles: &analyzer.CodeContext{
+				Files:   req.Files,
+				Summary: "Uploaded from browser",
+			},
+		}
+	}
+
+	app, err := h.apps.Register(r.Context(), req.Name, req.Description, req.GitRepoURL, req.SourcePath, domain.CloudProvider(req.Provider), opts)
 	if err != nil {
 		handleServiceError(w, err)
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, app)
+}
+
+func (h *Handlers) OnboardApplication(w http.ResponseWriter, r *http.Request) {
+	var req onboardRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	var opts *service.RegisterOpts
+	if len(req.Files) > 0 {
+		opts = &service.RegisterOpts{
+			UploadedFiles: &analyzer.CodeContext{
+				Files:   req.Files,
+				Summary: "Uploaded from onboarding wizard",
+			},
+		}
+	}
+
+	result, err := h.apps.Onboard(
+		r.Context(),
+		req.Name, req.Description, req.SourcePath,
+		domain.CloudProvider(req.Provider),
+		opts,
+		h.planner,
+	)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
 }
 
 func (h *Handlers) ListApplications(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +219,41 @@ func (h *Handlers) ReanalyzeSource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.apps.ReanalyzeSource(r.Context(), app.ID); err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Analyze Upload Handler ---
+
+func (h *Handlers) AnalyzeUpload(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	var req analyzeUploadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(req.Files) == 0 {
+		writeError(w, http.StatusBadRequest, "no files provided")
+		return
+	}
+
+	app, err := h.apps.GetByName(r.Context(), name)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	codeCtx := analyzer.CodeContext{
+		Files:   req.Files,
+		Summary: "Uploaded from browser",
+	}
+
+	if err := h.apps.AnalyzeUploadedFiles(r.Context(), app.ID, codeCtx); err != nil {
 		handleServiceError(w, err)
 		return
 	}
@@ -363,6 +469,93 @@ func (h *Handlers) GetDeploymentStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, d)
+}
+
+// --- Terraform HCL Handler ---
+
+func (h *Handlers) GenerateTerraformHCL(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid resource ID")
+		return
+	}
+
+	var req struct {
+		Provider string `json:"provider"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	hcl, err := h.resources.GenerateTerraformHCL(r.Context(), id, domain.CloudProvider(req.Provider))
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"hcl": hcl})
+}
+
+// --- Graph Handlers ---
+
+func (h *Handlers) GenerateGraph(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	app, err := h.apps.GetByName(r.Context(), name)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	graph, err := h.graphs.GenerateGraph(r.Context(), app.ID)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, graph)
+}
+
+func (h *Handlers) GetLatestGraph(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	app, err := h.apps.GetByName(r.Context(), name)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	graph, err := h.graphs.GetLatest(r.Context(), app.ID)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, graph)
+}
+
+func (h *Handlers) GetLiveResources(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	app, err := h.apps.GetByName(r.Context(), name)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	result, err := h.discovery.DiscoverLiveResources(r.Context(), app.ID)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // --- Helpers ---

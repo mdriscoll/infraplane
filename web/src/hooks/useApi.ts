@@ -28,10 +28,32 @@ export function useRegisterApplication() {
   })
 }
 
+export function useOnboardApplication() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.onboardApplication,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['applications'] })
+    },
+  })
+}
+
 export function useReanalyzeSource(appName: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => api.reanalyzeSource(appName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['applications', appName] })
+      queryClient.invalidateQueries({ queryKey: ['resources', appName] })
+    },
+  })
+}
+
+export function useAnalyzeUpload(appName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (files: { path: string; content: string }[]) =>
+      api.analyzeUpload(appName, files),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['applications', appName] })
       queryClient.invalidateQueries({ queryKey: ['resources', appName] })
@@ -139,6 +161,39 @@ export function useDeploy(appName: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deployments', appName] })
       queryClient.invalidateQueries({ queryKey: ['applications', appName] })
+    },
+  })
+}
+
+// --- Live Resource Hooks ---
+
+export function useDiscoverLiveResources(appName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.getLiveResources(appName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['applications', appName] })
+    },
+  })
+}
+
+// --- Graph Hooks ---
+
+export function useGraph(appName: string) {
+  return useQuery({
+    queryKey: ['graph', appName],
+    queryFn: () => api.getLatestGraph(appName),
+    enabled: !!appName,
+    retry: false,
+  })
+}
+
+export function useGenerateGraph(appName: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.generateGraph(appName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['graph', appName] })
     },
   })
 }

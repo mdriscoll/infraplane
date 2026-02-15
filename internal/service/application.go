@@ -30,9 +30,18 @@ func NewApplicationService(apps repository.ApplicationRepo, resources repository
 	}
 }
 
+// RegisterOpts holds optional parameters for application registration.
+type RegisterOpts struct {
+	// UploadedFiles contains file contents uploaded from a browser (when
+	// the source path can't be provided due to browser security restrictions).
+	UploadedFiles *analyzer.CodeContext
+}
+
 // Register creates a new application. If a sourcePath is provided and the LLM
 // client is configured, it analyzes the codebase and auto-detects resources.
-func (s *ApplicationService) Register(ctx context.Context, name, description, gitRepoURL, sourcePath string, provider domain.CloudProvider) (domain.Application, error) {
+// If opts.UploadedFiles is provided (browser upload flow), those files are
+// analyzed instead of reading from the filesystem.
+func (s *ApplicationService) Register(ctx context.Context, name, description, gitRepoURL, sourcePath string, provider domain.CloudProvider, opts *RegisterOpts) (domain.Application, error) {
 	app := domain.NewApplication(name, description, gitRepoURL, sourcePath, provider)
 	if err := app.Validate(); err != nil {
 		return domain.Application{}, err
@@ -43,10 +52,17 @@ func (s *ApplicationService) Register(ctx context.Context, name, description, gi
 	}
 
 	// Auto-detect resources from source if configured
-	if sourcePath != "" && s.llm != nil && s.resources != nil {
-		if err := s.autoDetectResources(ctx, app); err != nil {
-			// Graceful degradation: log the error but still return the app
-			log.Printf("auto-detect resources for %s: %v", app.Name, err)
+	if s.llm != nil && s.resources != nil {
+		if opts != nil && opts.UploadedFiles != nil && len(opts.UploadedFiles.Files) > 0 {
+			// Browser upload flow: analyze the uploaded file contents directly
+			if err := s.AnalyzeUploadedFiles(ctx, app.ID, *opts.UploadedFiles); err != nil {
+				log.Printf("auto-detect resources (uploaded) for %s: %v", app.Name, err)
+			}
+		} else if sourcePath != "" {
+			// Server-side flow: read files from filesystem/git
+			if err := s.autoDetectResources(ctx, app); err != nil {
+				log.Printf("auto-detect resources for %s: %v", app.Name, err)
+			}
 		}
 	}
 
@@ -106,6 +122,46 @@ func (s *ApplicationService) ReanalyzeSource(ctx context.Context, appID uuid.UUI
 	return s.autoDetectResources(ctx, app)
 }
 
+// AnalyzeUploadedFiles analyzes file contents uploaded from the browser (since
+// browsers can't expose filesystem paths). It runs LLM analysis on the provided
+// CodeContext and creates resources for the application.
+func (s *ApplicationService) AnalyzeUploadedFiles(ctx context.Context, appID uuid.UUID, codeCtx analyzer.CodeContext) error {
+	app, err := s.apps.GetByID(ctx, appID)
+	if err != nil {
+		return err
+	}
+
+	if s.llm == nil || s.resources == nil {
+		return domain.ErrValidation("auto-detection not configured")
+	}
+
+	if len(codeCtx.Files) == 0 {
+		return nil
+	}
+
+	recommendations, err := s.llm.AnalyzeCodebase(ctx, codeCtx, app.Provider)
+	if err != nil {
+		return fmt.Errorf("LLM codebase analysis: %w", err)
+	}
+
+	for _, rec := range recommendations {
+		resource := domain.NewResource(app.ID, rec.Kind, rec.Name, rec.Spec)
+		resource.ProviderMappings = rec.Mappings
+
+		if err := resource.Validate(); err != nil {
+			log.Printf("skip invalid resource %s: %v", rec.Name, err)
+			continue
+		}
+
+		if err := s.resources.Create(ctx, resource); err != nil {
+			log.Printf("create resource %s: %v", rec.Name, err)
+			continue
+		}
+	}
+
+	return nil
+}
+
 // Get returns an application by ID.
 func (s *ApplicationService) Get(ctx context.Context, id uuid.UUID) (domain.Application, error) {
 	return s.apps.GetByID(ctx, id)
@@ -138,4 +194,58 @@ func (s *ApplicationService) UpdateStatus(ctx context.Context, id uuid.UUID, sta
 // Delete removes an application.
 func (s *ApplicationService) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.apps.Delete(ctx, id)
+}
+
+// OnboardResult holds the full onboarding result: app, detected resources, and hosting plan.
+type OnboardResult struct {
+	Application domain.Application       `json:"application"`
+	Resources   []domain.Resource        `json:"resources"`
+	Plan        domain.InfrastructurePlan `json:"plan"`
+}
+
+// Onboard performs the complete onboarding flow in a single operation:
+// 1. Register the application (with auto-detect resources)
+// 2. Load the detected resources
+// 3. Generate a hosting plan
+// The planner parameter avoids a circular dependency between services.
+func (s *ApplicationService) Onboard(
+	ctx context.Context,
+	name, description, sourcePath string,
+	provider domain.CloudProvider,
+	opts *RegisterOpts,
+	planner *PlannerService,
+) (OnboardResult, error) {
+	// Step 1: Register the application (includes auto-detect resources)
+	app, err := s.Register(ctx, name, description, "", sourcePath, provider, opts)
+	if err != nil {
+		return OnboardResult{}, fmt.Errorf("register: %w", err)
+	}
+
+	// Step 2: Load the detected resources
+	resources, err := s.resources.ListByApplicationID(ctx, app.ID)
+	if err != nil {
+		return OnboardResult{}, fmt.Errorf("list resources: %w", err)
+	}
+
+	// Step 3: Generate hosting plan
+	// Use a detached context so plan generation isn't cancelled if the HTTP
+	// request is interrupted — the plan is non-critical and we already have
+	// the app and resources saved.
+	planCtx, planCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer planCancel()
+	plan, err := planner.GenerateHostingPlan(planCtx, app.ID)
+	if err != nil {
+		// Plan generation failed but app + resources are still valid
+		log.Printf("onboard: hosting plan generation failed for %s: %v", name, err)
+		return OnboardResult{
+			Application: app,
+			Resources:   resources,
+		}, nil
+	}
+
+	return OnboardResult{
+		Application: app,
+		Resources:   resources,
+		Plan:        plan,
+	}, nil
 }

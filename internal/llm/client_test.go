@@ -36,9 +36,34 @@ func TestExtractJSON(t *testing.T) {
 			want:  `{"kind": "database", "spec": {"engine": "postgres"}}`,
 		},
 		{
+			name:  "JSON array",
+			input: `[{"kind": "database"}, {"kind": "cache"}]`,
+			want:  `[{"kind": "database"}, {"kind": "cache"}]`,
+		},
+		{
+			name:  "JSON array with surrounding text",
+			input: "Here are the resources: [{\"kind\": \"database\"}, {\"kind\": \"cache\"}] done.",
+			want:  `[{"kind": "database"}, {"kind": "cache"}]`,
+		},
+		{
+			name:  "JSON array in markdown fence",
+			input: "```json\n[{\"kind\": \"database\"}]\n```",
+			want:  `[{"kind": "database"}]`,
+		},
+		{
 			name:  "no JSON at all",
 			input: "Just some plain text",
 			want:  "Just some plain text",
+		},
+		{
+			name:  "JSON with braces inside string values",
+			input: `{"content": "Use resource \"foo\" {\n  name = \"bar\"\n}\nfor config", "cost": 100}`,
+			want:  `{"content": "Use resource \"foo\" {\n  name = \"bar\"\n}\nfor config", "cost": 100}`,
+		},
+		{
+			name:  "hosting plan JSON with markdown containing code blocks",
+			input: `{"content": "# Plan\n\n` + "```" + `hcl\nresource \"aws_instance\" \"web\" {\n  ami = \"abc\"\n}\n` + "```" + `\n\nDone.", "estimated_cost": {"monthly_cost_usd": 50}}`,
+			want:  `{"content": "# Plan\n\n` + "```" + `hcl\nresource \"aws_instance\" \"web\" {\n  ami = \"abc\"\n}\n` + "```" + `\n\nDone.", "estimated_cost": {"monthly_cost_usd": 50}}`,
 		},
 	}
 

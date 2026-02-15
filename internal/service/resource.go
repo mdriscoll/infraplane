@@ -67,3 +67,18 @@ func (s *ResourceService) ListByApplication(ctx context.Context, appID uuid.UUID
 func (s *ResourceService) Remove(ctx context.Context, id uuid.UUID) error {
 	return s.resources.Delete(ctx, id)
 }
+
+// GenerateTerraformHCL generates Terraform HCL for a single resource using the LLM.
+func (s *ResourceService) GenerateTerraformHCL(ctx context.Context, resourceID uuid.UUID, provider domain.CloudProvider) (string, error) {
+	resource, err := s.resources.GetByID(ctx, resourceID)
+	if err != nil {
+		return "", fmt.Errorf("get resource: %w", err)
+	}
+
+	result, err := s.llm.GenerateTerraformHCL(ctx, resource, provider)
+	if err != nil {
+		return "", fmt.Errorf("generate terraform HCL: %w", err)
+	}
+
+	return result.HCL, nil
+}

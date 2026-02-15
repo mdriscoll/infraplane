@@ -18,6 +18,8 @@ const (
 	ResourceQueue    ResourceKind = "queue"
 	ResourceCDN      ResourceKind = "cdn"
 	ResourceNetwork  ResourceKind = "network"
+	ResourceSecrets  ResourceKind = "secrets"
+	ResourcePolicy   ResourceKind = "policy"
 )
 
 // ValidResourceKinds returns all supported resource kinds.
@@ -25,6 +27,7 @@ func ValidResourceKinds() []ResourceKind {
 	return []ResourceKind{
 		ResourceDatabase, ResourceCompute, ResourceStorage,
 		ResourceCache, ResourceQueue, ResourceCDN, ResourceNetwork,
+		ResourceSecrets, ResourcePolicy,
 	}
 }
 

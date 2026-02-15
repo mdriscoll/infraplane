@@ -18,8 +18,12 @@ bin/
 vendor/
 
 # Node
+node_modules/
 web/node_modules/
 web/dist/
+
+# Claude Code
+.claude/
 
 # Test
 coverage.out

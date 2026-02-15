@@ -20,12 +20,16 @@ func setupTestRouter() http.Handler {
 	planRepo := mock.NewPlanRepo()
 	mockLLM := &llm.MockClient{}
 
+	graphRepo := mock.NewGraphRepo()
+
 	appSvc := service.NewApplicationService(appRepo, resRepo, mockLLM)
 	resSvc := service.NewResourceService(resRepo, appRepo, mockLLM)
 	planSvc := service.NewPlannerService(planRepo, appRepo, resRepo, mockLLM)
 	depSvc := service.NewDeploymentService(depRepo, appRepo)
+	graphSvc := service.NewGraphService(graphRepo, appRepo, resRepo, mockLLM)
+	discSvc := service.NewDiscoveryService(appRepo, mockLLM, nil)
 
-	return NewRouter(appSvc, resSvc, planSvc, depSvc)
+	return NewRouter(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc)
 }
 
 func doRequest(router http.Handler, method, path string, body any) *httptest.ResponseRecorder {
@@ -336,4 +340,65 @@ func TestListPlans(t *testing.T) {
 	if len(plans) != 1 {
 		t.Errorf("len = %d, want 1", len(plans))
 	}
+}
+
+func TestOnboardApplication(t *testing.T) {
+	router := setupTestRouter()
+
+	t.Run("successful onboard", func(t *testing.T) {
+		w := doRequest(router, "POST", "/api/applications/onboard", onboardRequest{
+			Name:     "wizard-app",
+			Provider: "aws",
+		})
+		if w.Code != http.StatusCreated {
+			t.Errorf("status = %d, want %d; body = %s", w.Code, http.StatusCreated, w.Body.String())
+		}
+
+		var result service.OnboardResult
+		json.NewDecoder(w.Body).Decode(&result)
+		if result.Application.Name != "wizard-app" {
+			t.Errorf("name = %q, want %q", result.Application.Name, "wizard-app")
+		}
+		if result.Application.Provider != domain.ProviderAWS {
+			t.Errorf("provider = %q, want %q", result.Application.Provider, domain.ProviderAWS)
+		}
+		// Plan should be generated (mock LLM returns default)
+		if result.Plan.PlanType != domain.PlanTypeHosting {
+			t.Errorf("PlanType = %q, want %q", result.Plan.PlanType, domain.PlanTypeHosting)
+		}
+	})
+
+	t.Run("missing name returns 400", func(t *testing.T) {
+		w := doRequest(router, "POST", "/api/applications/onboard", onboardRequest{
+			Provider: "gcp",
+		})
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("missing provider returns 400", func(t *testing.T) {
+		w := doRequest(router, "POST", "/api/applications/onboard", onboardRequest{
+			Name: "no-provider-app",
+		})
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("duplicate name returns 409", func(t *testing.T) {
+		// First onboard succeeds
+		doRequest(router, "POST", "/api/applications/onboard", onboardRequest{
+			Name:     "dup-onboard",
+			Provider: "aws",
+		})
+		// Second onboard with same name fails
+		w := doRequest(router, "POST", "/api/applications/onboard", onboardRequest{
+			Name:     "dup-onboard",
+			Provider: "aws",
+		})
+		if w.Code != http.StatusConflict {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
+		}
+	})
 }

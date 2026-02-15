@@ -18,6 +18,8 @@ type ToolHandlers struct {
 	resources   *service.ResourceService
 	planner     *service.PlannerService
 	deployments *service.DeploymentService
+	graphs      *service.GraphService
+	discovery   *service.DiscoveryService
 }
 
 // NewToolHandlers creates a new ToolHandlers.
@@ -26,12 +28,16 @@ func NewToolHandlers(
 	resources *service.ResourceService,
 	planner *service.PlannerService,
 	deployments *service.DeploymentService,
+	graphs *service.GraphService,
+	discovery *service.DiscoveryService,
 ) *ToolHandlers {
 	return &ToolHandlers{
 		apps:        apps,
 		resources:   resources,
 		planner:     planner,
 		deployments: deployments,
+		graphs:      graphs,
+		discovery:   discovery,
 	}
 }
 
@@ -46,6 +52,8 @@ func (h *ToolHandlers) RegisterAll(s *server.MCPServer) {
 	s.AddTool(planMigrationTool(), h.handlePlanMigration)
 	s.AddTool(deployTool(), h.handleDeploy)
 	s.AddTool(getDeploymentStatusTool(), h.handleGetDeploymentStatus)
+	s.AddTool(generateGraphTool(), h.handleGenerateGraph)
+	s.AddTool(discoverLiveResourcesTool(), h.handleDiscoverLiveResources)
 }
 
 // --- Tool Definitions ---
@@ -131,7 +139,7 @@ func (h *ToolHandlers) handleRegisterApplication(ctx context.Context, req gomcp.
 	provider, _ := req.RequireString("provider")
 
 	sourcePath := req.GetString("source_path", "")
-	app, err := h.apps.Register(ctx, name, description, gitRepoURL, sourcePath, domain.CloudProvider(provider))
+	app, err := h.apps.Register(ctx, name, description, gitRepoURL, sourcePath, domain.CloudProvider(provider), nil)
 	if err != nil {
 		return toolError(err), nil
 	}
@@ -333,6 +341,62 @@ func (h *ToolHandlers) handleGetDeploymentStatus(ctx context.Context, req gomcp.
 	}
 
 	return toolJSON(d)
+}
+
+func generateGraphTool() gomcp.Tool {
+	return gomcp.NewTool("generate_graph",
+		gomcp.WithDescription("Generate an infrastructure topology graph for an application. Analyzes all resources and produces a node/edge graph showing how components connect to each other and the public internet."),
+		gomcp.WithString("app_name", gomcp.Required(), gomcp.Description("Application name")),
+	)
+}
+
+func (h *ToolHandlers) handleGenerateGraph(ctx context.Context, req gomcp.CallToolRequest) (*gomcp.CallToolResult, error) {
+	appName, _ := req.RequireString("app_name")
+
+	app, err := h.apps.GetByName(ctx, appName)
+	if err != nil {
+		return toolError(fmt.Errorf("application '%s' not found", appName)), nil
+	}
+
+	graph, err := h.graphs.GenerateGraph(ctx, app.ID)
+	if err != nil {
+		return toolError(err), nil
+	}
+
+	return toolJSON(map[string]any{
+		"graph_id": graph.ID,
+		"nodes":    graph.Nodes,
+		"edges":    graph.Edges,
+		"message":  fmt.Sprintf("Infrastructure topology graph generated for '%s' with %d nodes and %d edges.", appName, len(graph.Nodes), len(graph.Edges)),
+	})
+}
+
+func discoverLiveResourcesTool() gomcp.Tool {
+	return gomcp.NewTool("discover_live_resources",
+		gomcp.WithDescription("Discover live cloud resources for an application by analyzing deploy scripts and querying cloud provider APIs. Returns real-time status of deployed infrastructure."),
+		gomcp.WithString("app_name", gomcp.Required(), gomcp.Description("Application name")),
+	)
+}
+
+func (h *ToolHandlers) handleDiscoverLiveResources(ctx context.Context, req gomcp.CallToolRequest) (*gomcp.CallToolResult, error) {
+	appName, _ := req.RequireString("app_name")
+
+	app, err := h.apps.GetByName(ctx, appName)
+	if err != nil {
+		return toolError(fmt.Errorf("application '%s' not found", appName)), nil
+	}
+
+	result, err := h.discovery.DiscoverLiveResources(ctx, app.ID)
+	if err != nil {
+		return toolError(err), nil
+	}
+
+	return toolJSON(map[string]any{
+		"resources": result.Resources,
+		"errors":    result.Errors,
+		"count":     len(result.Resources),
+		"message":   fmt.Sprintf("Discovered %d live resources for '%s'.", len(result.Resources), appName),
+	})
 }
 
 // --- Helper Functions ---

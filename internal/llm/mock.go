@@ -11,10 +11,14 @@ import (
 // MockClient is a mock implementation of Client for testing.
 // Set the return values before calling the methods.
 type MockClient struct {
-	AnalyzeResourceNeedFn    func(ctx context.Context, description string, provider domain.CloudProvider) (ResourceRecommendation, error)
-	AnalyzeCodebaseFn        func(ctx context.Context, codeCtx analyzer.CodeContext, provider domain.CloudProvider) ([]ResourceRecommendation, error)
-	GenerateHostingPlanFn    func(ctx context.Context, app domain.Application, resources []domain.Resource) (HostingPlanResult, error)
-	GenerateMigrationPlanFn  func(ctx context.Context, app domain.Application, resources []domain.Resource, from, to domain.CloudProvider) (MigrationPlanResult, error)
+	AnalyzeResourceNeedFn        func(ctx context.Context, description string, provider domain.CloudProvider) (ResourceRecommendation, error)
+	AnalyzeCodebaseFn            func(ctx context.Context, codeCtx analyzer.CodeContext, provider domain.CloudProvider) ([]ResourceRecommendation, error)
+	GenerateHostingPlanFn        func(ctx context.Context, app domain.Application, resources []domain.Resource) (HostingPlanResult, error)
+	GenerateMigrationPlanFn      func(ctx context.Context, app domain.Application, resources []domain.Resource, from, to domain.CloudProvider) (MigrationPlanResult, error)
+	GenerateGraphFn              func(ctx context.Context, app domain.Application, resources []domain.Resource) (GraphResult, error)
+	GenerateTerraformHCLFn       func(ctx context.Context, resource domain.Resource, provider domain.CloudProvider) (TerraformHCLResult, error)
+	GenerateDiscoveryCommandsFn  func(ctx context.Context, app domain.Application, codeCtx analyzer.CodeContext) (DiscoveryCommandResult, error)
+	ParseDiscoveryOutputFn       func(ctx context.Context, app domain.Application, outputs []CommandOutput) (LiveResourceParseResult, error)
 }
 
 func (m *MockClient) AnalyzeResourceNeed(ctx context.Context, description string, provider domain.CloudProvider) (ResourceRecommendation, error) {
@@ -43,6 +47,20 @@ func (m *MockClient) GenerateMigrationPlan(ctx context.Context, app domain.Appli
 		return m.GenerateMigrationPlanFn(ctx, app, resources, from, to)
 	}
 	return defaultMigrationPlan(), nil
+}
+
+func (m *MockClient) GenerateGraph(ctx context.Context, app domain.Application, resources []domain.Resource) (GraphResult, error) {
+	if m.GenerateGraphFn != nil {
+		return m.GenerateGraphFn(ctx, app, resources)
+	}
+	return defaultGraph(), nil
+}
+
+func (m *MockClient) GenerateTerraformHCL(ctx context.Context, resource domain.Resource, provider domain.CloudProvider) (TerraformHCLResult, error) {
+	if m.GenerateTerraformHCLFn != nil {
+		return m.GenerateTerraformHCLFn(ctx, resource, provider)
+	}
+	return TerraformHCLResult{HCL: `resource "example" "mock" { name = "` + resource.Name + `" }`}, nil
 }
 
 func defaultCodebaseRecommendations() []ResourceRecommendation {
@@ -120,6 +138,76 @@ func defaultMigrationPlan() MigrationPlanResult {
 		EstimatedCost: &domain.CostEstimate{
 			MonthlyCostUSD: 120.00,
 			Breakdown:      map[string]float64{"compute": 70, "database": 35, "storage": 15},
+		},
+	}
+}
+
+func (m *MockClient) GenerateDiscoveryCommands(ctx context.Context, app domain.Application, codeCtx analyzer.CodeContext) (DiscoveryCommandResult, error) {
+	if m.GenerateDiscoveryCommandsFn != nil {
+		return m.GenerateDiscoveryCommandsFn(ctx, app, codeCtx)
+	}
+	return defaultDiscoveryCommands(), nil
+}
+
+func (m *MockClient) ParseDiscoveryOutput(ctx context.Context, app domain.Application, outputs []CommandOutput) (LiveResourceParseResult, error) {
+	if m.ParseDiscoveryOutputFn != nil {
+		return m.ParseDiscoveryOutputFn(ctx, app, outputs)
+	}
+	return defaultLiveResources(), nil
+}
+
+func defaultDiscoveryCommands() DiscoveryCommandResult {
+	return DiscoveryCommandResult{
+		Commands: []DiscoveryCommand{
+			{
+				Description:  "List Cloud Run services",
+				Command:      "gcloud run services list --project=my-project --region=us-central1 --format=json",
+				ResourceType: "Cloud Run Service",
+			},
+			{
+				Description:  "Describe Cloud SQL instance",
+				Command:      "gcloud sql instances describe my-db --project=my-project --format=json",
+				ResourceType: "Cloud SQL Instance",
+			},
+		},
+	}
+}
+
+func defaultLiveResources() LiveResourceParseResult {
+	return LiveResourceParseResult{
+		Resources: []domain.LiveResource{
+			{
+				ResourceType: "Cloud Run Service",
+				Name:         "api-server",
+				Provider:     domain.ProviderGCP,
+				Region:       "us-central1",
+				Status:       domain.LiveResourceActive,
+				Details:      map[string]string{"url": "https://api-server-xxx.run.app", "memory": "512Mi"},
+			},
+			{
+				ResourceType: "Cloud SQL Instance",
+				Name:         "app-database",
+				Provider:     domain.ProviderGCP,
+				Region:       "us-central1",
+				Status:       domain.LiveResourceActive,
+				Details:      map[string]string{"tier": "db-f1-micro", "database_version": "POSTGRES_15"},
+			},
+		},
+	}
+}
+
+func defaultGraph() GraphResult {
+	return GraphResult{
+		Nodes: []domain.GraphNode{
+			{ID: "internet", Label: "Internet", Kind: domain.GraphNodeInternet, Service: "Public Internet"},
+			{ID: "api-server", Label: "API Server", Kind: domain.GraphNodeCompute, Service: "Cloud Run"},
+			{ID: "app-database", Label: "App Database", Kind: domain.GraphNodeDatabase, Service: "Cloud SQL"},
+			{ID: "app-cache", Label: "App Cache", Kind: domain.GraphNodeCache, Service: "Memorystore"},
+		},
+		Edges: []domain.GraphEdge{
+			{ID: "internet-to-api", Source: "internet", Target: "api-server", Label: "HTTPS"},
+			{ID: "api-to-db", Source: "api-server", Target: "app-database", Label: "TCP/5432"},
+			{ID: "api-to-cache", Source: "api-server", Target: "app-cache", Label: "Redis/6379"},
 		},
 	}
 }

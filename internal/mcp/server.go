@@ -11,6 +11,8 @@ func NewServer(
 	resSvc *service.ResourceService,
 	planSvc *service.PlannerService,
 	depSvc *service.DeploymentService,
+	graphSvc *service.GraphService,
+	discSvc *service.DiscoveryService,
 ) *server.MCPServer {
 	s := server.NewMCPServer(
 		"infraplane",
@@ -19,7 +21,7 @@ func NewServer(
 		server.WithRecovery(),
 	)
 
-	handlers := NewToolHandlers(appSvc, resSvc, planSvc, depSvc)
+	handlers := NewToolHandlers(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc)
 	handlers.RegisterAll(s)
 
 	return s
