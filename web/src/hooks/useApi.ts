@@ -1,5 +1,7 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as api from '../api/client'
+import type { DeploymentEvent } from '../api/client'
 
 // --- Application Hooks ---
 
@@ -156,8 +158,8 @@ export function useLatestDeployment(appName: string) {
 export function useDeploy(appName: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ gitBranch, gitCommit }: { gitBranch: string; gitCommit?: string }) =>
-      api.deploy(appName, gitBranch, gitCommit),
+    mutationFn: ({ gitBranch, gitCommit, planId }: { gitBranch: string; gitCommit?: string; planId?: string }) =>
+      api.deploy(appName, gitBranch, gitCommit, planId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deployments', appName] })
       queryClient.invalidateQueries({ queryKey: ['applications', appName] })
@@ -196,4 +198,64 @@ export function useGenerateGraph(appName: string) {
       queryClient.invalidateQueries({ queryKey: ['graph', appName] })
     },
   })
+}
+
+// --- Compliance Framework Hooks ---
+
+export function useComplianceFrameworks(provider?: string) {
+  return useQuery({
+    queryKey: ['compliance-frameworks', provider],
+    queryFn: () => api.listComplianceFrameworks(provider),
+  })
+}
+
+// --- Deployment Stream Hook ---
+
+export function useDeploymentStream(deploymentId: string | null) {
+  const [events, setEvents] = useState<DeploymentEvent[]>([])
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [isComplete, setIsComplete] = useState(false)
+  const [finalStatus, setFinalStatus] = useState<'succeeded' | 'failed' | null>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
+
+  const reset = useCallback(() => {
+    setEvents([])
+    setIsStreaming(false)
+    setIsComplete(false)
+    setFinalStatus(null)
+  }, [])
+
+  useEffect(() => {
+    if (!deploymentId) return
+
+    reset()
+    setIsStreaming(true)
+
+    const es = new EventSource(api.getDeploymentStreamUrl(deploymentId))
+    eventSourceRef.current = es
+
+    es.onmessage = (e) => {
+      const event: DeploymentEvent = JSON.parse(e.data)
+      setEvents((prev) => [...prev, event])
+
+      if (event.step === 'complete' || event.step === 'failed') {
+        setIsComplete(true)
+        setIsStreaming(false)
+        setFinalStatus(event.status === 'succeeded' ? 'succeeded' : 'failed')
+        es.close()
+      }
+    }
+
+    es.onerror = () => {
+      setIsStreaming(false)
+      es.close()
+    }
+
+    return () => {
+      es.close()
+      eventSourceRef.current = null
+    }
+  }, [deploymentId, reset])
+
+  return { events, isStreaming, isComplete, finalStatus, reset }
 }

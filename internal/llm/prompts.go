@@ -55,7 +55,7 @@ Guidelines:
 
 const hostingPlanSystemPrompt = `You are an expert cloud infrastructure architect. Analyze an application's resources and generate a concise hosting plan.
 
-Respond with ONLY a JSON object (no markdown fences, no explanation):
+Respond with ONLY a valid JSON object. Do NOT wrap in markdown fences. Do NOT include any text before or after the JSON.
 
 {
   "content": "Hosting plan in Markdown format",
@@ -70,18 +70,18 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
   }
 }
 
-The "content" field should be concise Markdown (aim for under 2000 words) covering:
+CRITICAL: The "content" field must be CONCISE Markdown, strictly under 1500 words. Brevity is essential — be specific but not verbose. Cover:
 - Architecture overview: which services to use and why
-- Network topology: VPC, subnets, load balancers
-- Security: IAM roles, encryption, security groups
-- Scaling strategy: auto-scaling rules
-- Monitoring: key metrics and alerting
+- Network topology: VPC, subnets, load balancers (brief)
+- Security: IAM roles, encryption (brief)
+- Scaling strategy (brief)
+- Compliance: if compliance frameworks are specified, list which rules each resource satisfies using a compact table or bullet list — do NOT write lengthy explanations per rule
 
 Guidelines:
 - Be specific about instance types and configurations
-- Do NOT include full Terraform code — just mention key resource names
+- Do NOT include Terraform code blocks in the content — just mention resource names
 - Estimate costs based on current cloud provider pricing
-- Keep the response focused and actionable`
+- If compliance requirements are provided, reference rule IDs (e.g. CIS 4.1, CIS 6.4) concisely`
 
 const migrationPlanSystemPrompt = `You are an expert cloud migration architect. Generate a concise migration plan for moving an application between cloud providers.
 
@@ -123,7 +123,7 @@ User's description:
 %s`, provider, description)
 }
 
-func buildHostingPlanPrompt(app domain.Application, resources []domain.Resource) string {
+func buildHostingPlanPrompt(app domain.Application, resources []domain.Resource, complianceContext string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Generate a hosting plan for the following application:\n\n"))
 	sb.WriteString(fmt.Sprintf("Application: %s\n", app.Name))
@@ -147,6 +147,11 @@ func buildHostingPlanPrompt(app domain.Application, resources []domain.Resource)
 		}
 	} else {
 		sb.WriteString("No resources defined yet. Recommend a basic hosting setup based on the application description.\n")
+	}
+
+	if complianceContext != "" {
+		sb.WriteString("\n")
+		sb.WriteString(complianceContext)
 	}
 
 	return sb.String()
@@ -347,9 +352,10 @@ Guidelines:
 - Include comments explaining key configuration choices
 - Use variables for values that should be configurable
 - Follow Terraform best practices for the target provider
-- Keep it focused on this single resource — do not include provider blocks`
+- Keep it focused on this single resource — do not include provider blocks
+- If compliance requirements are provided, you MUST satisfy every listed rule. Add a comment referencing the rule ID next to each compliance-related attribute (e.g. # CIS 6.4: Require SSL connections)`
 
-func buildTerraformHCLPrompt(resource domain.Resource, provider domain.CloudProvider) string {
+func buildTerraformHCLPrompt(resource domain.Resource, provider domain.CloudProvider, complianceContext string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Generate Terraform HCL for the following resource on %s:\n\n", provider))
 	sb.WriteString(fmt.Sprintf("Resource Name: %s\n", resource.Name))
@@ -365,6 +371,11 @@ func buildTerraformHCLPrompt(resource domain.Resource, provider domain.CloudProv
 		configJSON, _ := json.Marshal(mapping.Config)
 		sb.WriteString(fmt.Sprintf("Provider Service: %s\n", mapping.ServiceName))
 		sb.WriteString(fmt.Sprintf("Provider Config: %s\n", string(configJSON)))
+	}
+
+	if complianceContext != "" {
+		sb.WriteString("\n")
+		sb.WriteString(complianceContext)
 	}
 
 	return sb.String()

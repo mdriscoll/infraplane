@@ -22,14 +22,14 @@ func setupTestHandlers() *ToolHandlers {
 
 	graphRepo := mock.NewGraphRepo()
 
-	appSvc := service.NewApplicationService(appRepo, resRepo, mockLLM)
-	resSvc := service.NewResourceService(resRepo, appRepo, mockLLM)
-	planSvc := service.NewPlannerService(planRepo, appRepo, resRepo, mockLLM)
+	appSvc := service.NewApplicationService(appRepo, resRepo, mockLLM, nil)
+	resSvc := service.NewResourceService(resRepo, appRepo, mockLLM, nil)
+	planSvc := service.NewPlannerService(planRepo, appRepo, resRepo, mockLLM, nil)
 	depSvc := service.NewDeploymentService(depRepo, appRepo)
 	graphSvc := service.NewGraphService(graphRepo, appRepo, resRepo, mockLLM)
 	discSvc := service.NewDiscoveryService(appRepo, mockLLM, nil)
 
-	return NewToolHandlers(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc)
+	return NewToolHandlers(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc, nil)
 }
 
 func makeRequest(args map[string]any) gomcp.CallToolRequest {

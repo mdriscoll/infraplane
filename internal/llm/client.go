@@ -75,8 +75,9 @@ type Client interface {
 	AnalyzeCodebase(ctx context.Context, codeCtx analyzer.CodeContext, provider domain.CloudProvider) ([]ResourceRecommendation, error)
 
 	// GenerateHostingPlan analyzes an application's resources and generates
-	// a hosting strategy with cost estimates.
-	GenerateHostingPlan(ctx context.Context, app domain.Application, resources []domain.Resource) (HostingPlanResult, error)
+	// a hosting strategy with cost estimates. complianceContext contains
+	// formatted compliance rules to inject into the prompt (empty string if none).
+	GenerateHostingPlan(ctx context.Context, app domain.Application, resources []domain.Resource, complianceContext string) (HostingPlanResult, error)
 
 	// GenerateMigrationPlan creates a migration plan to move an application
 	// from one cloud provider to another.
@@ -87,7 +88,8 @@ type Client interface {
 	GenerateGraph(ctx context.Context, app domain.Application, resources []domain.Resource) (GraphResult, error)
 
 	// GenerateTerraformHCL generates Terraform HCL for a single resource.
-	GenerateTerraformHCL(ctx context.Context, resource domain.Resource, provider domain.CloudProvider) (TerraformHCLResult, error)
+	// complianceContext contains formatted compliance rules to inject into the prompt (empty string if none).
+	GenerateTerraformHCL(ctx context.Context, resource domain.Resource, provider domain.CloudProvider, complianceContext string) (TerraformHCLResult, error)
 
 	// GenerateDiscoveryCommands analyzes deploy scripts and generates CLI commands
 	// to discover live cloud resources for the given provider.

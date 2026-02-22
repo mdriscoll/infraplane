@@ -42,7 +42,7 @@ func TestBuildHostingPlanPrompt(t *testing.T) {
 		},
 	}
 
-	prompt := buildHostingPlanPrompt(app, resources)
+	prompt := buildHostingPlanPrompt(app, resources, "")
 
 	if !strings.Contains(prompt, "my-api") {
 		t.Error("prompt should contain app name")
@@ -64,7 +64,7 @@ func TestBuildHostingPlanPrompt_NoResources(t *testing.T) {
 		Provider: domain.ProviderGCP,
 	}
 
-	prompt := buildHostingPlanPrompt(app, nil)
+	prompt := buildHostingPlanPrompt(app, nil, "")
 
 	if !strings.Contains(prompt, "No resources defined") {
 		t.Error("prompt should indicate no resources")

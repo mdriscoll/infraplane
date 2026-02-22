@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"strings"
+
 	"github.com/google/uuid"
 	gomcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/matthewdriscoll/infraplane/internal/compliance"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 	"github.com/matthewdriscoll/infraplane/internal/service"
 )
@@ -20,6 +23,7 @@ type ToolHandlers struct {
 	deployments *service.DeploymentService
 	graphs      *service.GraphService
 	discovery   *service.DiscoveryService
+	compliance  *compliance.Registry
 }
 
 // NewToolHandlers creates a new ToolHandlers.
@@ -30,6 +34,7 @@ func NewToolHandlers(
 	deployments *service.DeploymentService,
 	graphs *service.GraphService,
 	discovery *service.DiscoveryService,
+	complianceRegistry *compliance.Registry,
 ) *ToolHandlers {
 	return &ToolHandlers{
 		apps:        apps,
@@ -38,6 +43,7 @@ func NewToolHandlers(
 		deployments: deployments,
 		graphs:      graphs,
 		discovery:   discovery,
+		compliance:  complianceRegistry,
 	}
 }
 
@@ -54,18 +60,20 @@ func (h *ToolHandlers) RegisterAll(s *server.MCPServer) {
 	s.AddTool(getDeploymentStatusTool(), h.handleGetDeploymentStatus)
 	s.AddTool(generateGraphTool(), h.handleGenerateGraph)
 	s.AddTool(discoverLiveResourcesTool(), h.handleDiscoverLiveResources)
+	s.AddTool(listComplianceFrameworksTool(), h.handleListComplianceFrameworks)
 }
 
 // --- Tool Definitions ---
 
 func registerApplicationTool() gomcp.Tool {
 	return gomcp.NewTool("register_application",
-		gomcp.WithDescription("Register a new application in Infraplane. Provide a source path (local directory or git URL) to auto-detect infrastructure resources from the codebase."),
+		gomcp.WithDescription("Register a new application in Infraplane. Provide a source path (local directory or git URL) to auto-detect infrastructure resources from the codebase. Optionally specify compliance frameworks to enforce."),
 		gomcp.WithString("name", gomcp.Required(), gomcp.Description("Application name (must be unique, kebab-case recommended)")),
 		gomcp.WithString("description", gomcp.Description("Brief description of what the application does")),
 		gomcp.WithString("git_repo_url", gomcp.Description("Git repository URL (e.g. https://github.com/org/repo)")),
 		gomcp.WithString("source_path", gomcp.Description("Local filesystem path or git URL to analyze for auto-detecting infrastructure resources (e.g. '/path/to/project' or 'https://github.com/org/repo')")),
 		gomcp.WithString("provider", gomcp.Required(), gomcp.Description("Preferred cloud provider"), gomcp.Enum("aws", "gcp")),
+		gomcp.WithString("compliance_frameworks", gomcp.Description("Comma-separated list of compliance framework IDs to enforce (e.g. 'cis_gcp_v4'). Use list_compliance_frameworks to see available options.")),
 	)
 }
 
@@ -115,10 +123,11 @@ func planMigrationTool() gomcp.Tool {
 
 func deployTool() gomcp.Tool {
 	return gomcp.NewTool("deploy",
-		gomcp.WithDescription("Trigger a deployment for an application from a git branch and commit."),
+		gomcp.WithDescription("Trigger a deployment for an application from a git branch and commit, optionally linked to a hosting plan."),
 		gomcp.WithString("app_name", gomcp.Required(), gomcp.Description("Application name")),
 		gomcp.WithString("git_branch", gomcp.Required(), gomcp.Description("Git branch to deploy from (e.g. 'main')")),
 		gomcp.WithString("git_commit", gomcp.Description("Git commit SHA (optional, defaults to latest)")),
+		gomcp.WithString("plan_id", gomcp.Description("Infrastructure plan UUID to deploy (optional)")),
 	)
 }
 
@@ -137,20 +146,36 @@ func (h *ToolHandlers) handleRegisterApplication(ctx context.Context, req gomcp.
 	description := req.GetString("description", "")
 	gitRepoURL := req.GetString("git_repo_url", "")
 	provider, _ := req.RequireString("provider")
-
 	sourcePath := req.GetString("source_path", "")
-	app, err := h.apps.Register(ctx, name, description, gitRepoURL, sourcePath, domain.CloudProvider(provider), nil)
+
+	// Parse comma-separated compliance frameworks
+	var complianceFrameworks []string
+	if fw := req.GetString("compliance_frameworks", ""); fw != "" {
+		for _, f := range strings.Split(fw, ",") {
+			trimmed := strings.TrimSpace(f)
+			if trimmed != "" {
+				complianceFrameworks = append(complianceFrameworks, trimmed)
+			}
+		}
+	}
+
+	app, err := h.apps.Register(ctx, name, description, gitRepoURL, sourcePath, domain.CloudProvider(provider), complianceFrameworks, nil)
 	if err != nil {
 		return toolError(err), nil
 	}
 
-	return toolJSON(map[string]any{
+	result := map[string]any{
 		"id":       app.ID,
 		"name":     app.Name,
 		"provider": app.Provider,
 		"status":   app.Status,
 		"message":  fmt.Sprintf("Application '%s' registered successfully on %s.", app.Name, app.Provider),
-	})
+	}
+	if len(app.ComplianceFrameworks) > 0 {
+		result["compliance_frameworks"] = app.ComplianceFrameworks
+	}
+
+	return toolJSON(result)
 }
 
 func (h *ToolHandlers) handleListApplications(ctx context.Context, req gomcp.CallToolRequest) (*gomcp.CallToolResult, error) {
@@ -292,13 +317,23 @@ func (h *ToolHandlers) handleDeploy(ctx context.Context, req gomcp.CallToolReque
 	appName, _ := req.RequireString("app_name")
 	gitBranch, _ := req.RequireString("git_branch")
 	gitCommit := req.GetString("git_commit", "")
+	planIDStr := req.GetString("plan_id", "")
 
 	app, err := h.apps.GetByName(ctx, appName)
 	if err != nil {
 		return toolError(fmt.Errorf("application '%s' not found", appName)), nil
 	}
 
-	d, err := h.deployments.Deploy(ctx, app.ID, gitCommit, gitBranch)
+	var planID *uuid.UUID
+	if planIDStr != "" {
+		id, err := uuid.Parse(planIDStr)
+		if err != nil {
+			return toolError(fmt.Errorf("invalid plan_id: %s", planIDStr)), nil
+		}
+		planID = &id
+	}
+
+	d, err := h.deployments.Deploy(ctx, app.ID, gitCommit, gitBranch, planID)
 	if err != nil {
 		return toolError(err), nil
 	}
@@ -396,6 +431,29 @@ func (h *ToolHandlers) handleDiscoverLiveResources(ctx context.Context, req gomc
 		"errors":    result.Errors,
 		"count":     len(result.Resources),
 		"message":   fmt.Sprintf("Discovered %d live resources for '%s'.", len(result.Resources), appName),
+	})
+}
+
+func listComplianceFrameworksTool() gomcp.Tool {
+	return gomcp.NewTool("list_compliance_frameworks",
+		gomcp.WithDescription("List available compliance frameworks that can be applied to applications. Optionally filter by cloud provider."),
+		gomcp.WithString("provider", gomcp.Description("Filter frameworks by cloud provider (aws or gcp). If omitted, returns all frameworks.")),
+	)
+}
+
+func (h *ToolHandlers) handleListComplianceFrameworks(ctx context.Context, req gomcp.CallToolRequest) (*gomcp.CallToolResult, error) {
+	providerFilter := req.GetString("provider", "")
+
+	var frameworks []compliance.FrameworkInfo
+	if providerFilter != "" {
+		frameworks = h.compliance.ListFrameworksForProvider(domain.CloudProvider(providerFilter))
+	} else {
+		frameworks = h.compliance.ListFrameworks()
+	}
+
+	return toolJSON(map[string]any{
+		"frameworks": frameworks,
+		"count":      len(frameworks),
 	})
 }
 

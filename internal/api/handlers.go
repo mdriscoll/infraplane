@@ -3,11 +3,13 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/matthewdriscoll/infraplane/internal/analyzer"
+	"github.com/matthewdriscoll/infraplane/internal/compliance"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 	"github.com/matthewdriscoll/infraplane/internal/service"
 )
@@ -18,8 +20,10 @@ type Handlers struct {
 	resources   *service.ResourceService
 	planner     *service.PlannerService
 	deployments *service.DeploymentService
+	infra       *service.InfraService
 	graphs      *service.GraphService
 	discovery   *service.DiscoveryService
+	compliance  *compliance.Registry
 }
 
 // NewHandlers creates a new Handlers.
@@ -28,28 +32,33 @@ func NewHandlers(
 	resources *service.ResourceService,
 	planner *service.PlannerService,
 	deployments *service.DeploymentService,
+	infra *service.InfraService,
 	graphs *service.GraphService,
 	discovery *service.DiscoveryService,
+	complianceRegistry *compliance.Registry,
 ) *Handlers {
 	return &Handlers{
 		apps:        apps,
 		resources:   resources,
 		planner:     planner,
 		deployments: deployments,
+		infra:       infra,
 		graphs:      graphs,
 		discovery:   discovery,
+		compliance:  complianceRegistry,
 	}
 }
 
 // --- Request/Response Types ---
 
 type registerAppRequest struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	GitRepoURL  string                 `json:"git_repo_url"`
-	SourcePath  string                 `json:"source_path"`
-	Provider    string                 `json:"provider"`
-	Files       []analyzer.FileContent `json:"files,omitempty"`
+	Name                 string                 `json:"name"`
+	Description          string                 `json:"description"`
+	GitRepoURL           string                 `json:"git_repo_url"`
+	SourcePath           string                 `json:"source_path"`
+	Provider             string                 `json:"provider"`
+	ComplianceFrameworks []string               `json:"compliance_frameworks,omitempty"`
+	Files                []analyzer.FileContent `json:"files,omitempty"`
 }
 
 type analyzeUploadRequest struct {
@@ -68,14 +77,16 @@ type migrationPlanRequest struct {
 type deployRequest struct {
 	GitBranch string `json:"git_branch"`
 	GitCommit string `json:"git_commit"`
+	PlanID    string `json:"plan_id"`
 }
 
 type onboardRequest struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Provider    string                 `json:"provider"`
-	SourcePath  string                 `json:"source_path"`
-	Files       []analyzer.FileContent `json:"files,omitempty"`
+	Name                 string                 `json:"name"`
+	Description          string                 `json:"description"`
+	Provider             string                 `json:"provider"`
+	SourcePath           string                 `json:"source_path"`
+	ComplianceFrameworks []string               `json:"compliance_frameworks,omitempty"`
+	Files                []analyzer.FileContent `json:"files,omitempty"`
 }
 
 type errorResponse struct {
@@ -101,7 +112,7 @@ func (h *Handlers) RegisterApplication(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	app, err := h.apps.Register(r.Context(), req.Name, req.Description, req.GitRepoURL, req.SourcePath, domain.CloudProvider(req.Provider), opts)
+	app, err := h.apps.Register(r.Context(), req.Name, req.Description, req.GitRepoURL, req.SourcePath, domain.CloudProvider(req.Provider), req.ComplianceFrameworks, opts)
 	if err != nil {
 		handleServiceError(w, err)
 		return
@@ -140,6 +151,7 @@ func (h *Handlers) OnboardApplication(w http.ResponseWriter, r *http.Request) {
 		r.Context(),
 		req.Name, req.Description, req.SourcePath,
 		domain.CloudProvider(req.Provider),
+		req.ComplianceFrameworks,
 		opts,
 		h.planner,
 	)
@@ -406,7 +418,17 @@ func (h *Handlers) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d, err := h.deployments.Deploy(r.Context(), app.ID, req.GitCommit, req.GitBranch)
+	var planID *uuid.UUID
+	if req.PlanID != "" {
+		id, err := uuid.Parse(req.PlanID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid plan_id: "+req.PlanID)
+			return
+		}
+		planID = &id
+	}
+
+	d, err := h.deployments.Deploy(r.Context(), app.ID, req.GitCommit, req.GitBranch, planID)
 	if err != nil {
 		handleServiceError(w, err)
 		return
@@ -469,6 +491,52 @@ func (h *Handlers) GetDeploymentStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, d)
+}
+
+// DeployStream executes a pending deployment and streams real-time log events via SSE.
+func (h *Handlers) DeployStream(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid deployment ID")
+		return
+	}
+
+	// Verify the deployment exists and is pending
+	d, err := h.deployments.GetStatus(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+	if d.Status != domain.DeploymentPending {
+		writeError(w, http.StatusConflict, fmt.Sprintf("deployment is %s, not pending", d.Status))
+		return
+	}
+
+	// SSE requires http.Flusher
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	// SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	events := make(chan domain.DeploymentEvent, 32)
+
+	// Execute deployment in background goroutine
+	go h.deployments.Execute(r.Context(), id, h.infra, events)
+
+	// Stream events to client
+	for event := range events {
+		data, _ := json.Marshal(event)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
 }
 
 // --- Terraform HCL Handler ---
@@ -558,14 +626,34 @@ func (h *Handlers) GetLiveResources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// --- Compliance Handlers ---
+
+func (h *Handlers) ListComplianceFrameworks(w http.ResponseWriter, r *http.Request) {
+	providerFilter := r.URL.Query().Get("provider")
+
+	var frameworks []compliance.FrameworkInfo
+	if providerFilter != "" {
+		frameworks = h.compliance.ListFrameworksForProvider(domain.CloudProvider(providerFilter))
+	} else {
+		frameworks = h.compliance.ListFrameworks()
+	}
+	if frameworks == nil {
+		frameworks = []compliance.FrameworkInfo{}
+	}
+
+	writeJSON(w, http.StatusOK, frameworks)
+}
+
 // --- Helpers ---
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(errorResponse{Error: msg})
 }

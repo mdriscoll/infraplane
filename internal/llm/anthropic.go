@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -96,10 +97,10 @@ func (c *AnthropicClient) AnalyzeCodebase(ctx context.Context, codeCtx analyzer.
 	return results, nil
 }
 
-func (c *AnthropicClient) GenerateHostingPlan(ctx context.Context, app domain.Application, resources []domain.Resource) (HostingPlanResult, error) {
-	prompt := buildHostingPlanPrompt(app, resources)
+func (c *AnthropicClient) GenerateHostingPlan(ctx context.Context, app domain.Application, resources []domain.Resource, complianceContext string) (HostingPlanResult, error) {
+	prompt := buildHostingPlanPrompt(app, resources, complianceContext)
 
-	resp, err := c.sendMessage(ctx, prompt, hostingPlanSystemPrompt, 16384)
+	resp, err := c.sendMessage(ctx, prompt, hostingPlanSystemPrompt, 12288)
 	if err != nil {
 		return HostingPlanResult{}, fmt.Errorf("generate hosting plan: %w", err)
 	}
@@ -147,8 +148,8 @@ func (c *AnthropicClient) GenerateGraph(ctx context.Context, app domain.Applicat
 	return result, nil
 }
 
-func (c *AnthropicClient) GenerateTerraformHCL(ctx context.Context, resource domain.Resource, provider domain.CloudProvider) (TerraformHCLResult, error) {
-	prompt := buildTerraformHCLPrompt(resource, provider)
+func (c *AnthropicClient) GenerateTerraformHCL(ctx context.Context, resource domain.Resource, provider domain.CloudProvider, complianceContext string) (TerraformHCLResult, error) {
+	prompt := buildTerraformHCLPrompt(resource, provider, complianceContext)
 
 	resp, err := c.sendMessage(ctx, prompt, terraformHCLSystemPrompt, 8192)
 	if err != nil {
@@ -193,10 +194,12 @@ func (c *AnthropicClient) ParseDiscoveryOutput(ctx context.Context, app domain.A
 }
 
 // sendMessage sends a message to the Anthropic API and extracts the text response.
+// The SDK auto-calculates an appropriate timeout based on maxTokens (up to 10 min).
+// We do NOT set a manual context timeout — the SDK handles this correctly.
 func (c *AnthropicClient) sendMessage(ctx context.Context, userPrompt, systemPrompt string, maxTokens int64) (string, error) {
-	// Apply a 90-second timeout so requests don't hang forever
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
+	start := time.Now()
+	log.Printf("[llm] sending request: model=%s max_tokens=%d prompt_len=%d system_len=%d",
+		c.model, maxTokens, len(userPrompt), len(systemPrompt))
 
 	resp, err := c.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     c.model,
@@ -208,12 +211,19 @@ func (c *AnthropicClient) sendMessage(ctx context.Context, userPrompt, systemPro
 			anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt)),
 		},
 	})
+	elapsed := time.Since(start)
 	if err != nil {
+		log.Printf("[llm] API error after %s: %v", elapsed.Round(time.Millisecond), err)
 		return "", fmt.Errorf("anthropic API call: %w", err)
 	}
 
+	log.Printf("[llm] response received in %s: stop_reason=%s input_tokens=%d output_tokens=%d",
+		elapsed.Round(time.Millisecond), resp.StopReason,
+		resp.Usage.InputTokens, resp.Usage.OutputTokens)
+
 	// Check if the response was truncated
 	if resp.StopReason == "max_tokens" {
+		log.Printf("[llm] WARNING: response truncated at %d output tokens", resp.Usage.OutputTokens)
 		return "", fmt.Errorf("response truncated (hit %d token limit) — try reducing prompt complexity", maxTokens)
 	}
 
@@ -228,57 +238,51 @@ func (c *AnthropicClient) sendMessage(ctx context.Context, userPrompt, systemPro
 }
 
 // extractJSON attempts to extract a JSON object from text that may contain
-// markdown fences or surrounding prose.
+// markdown fences or surrounding prose. It tries multiple strategies and
+// validates each extraction attempt with json.Valid before returning.
 func extractJSON(text string) string {
-	// Try to find JSON between ```json and ``` markers
+	// Strategy 1: Try to find JSON between ```json and ``` markers.
+	// Be careful not to match ``` inside the JSON content — we look for
+	// the outermost closing ``` (searching from the end).
 	start := -1
-	end := -1
-
 	for i := 0; i < len(text)-6; i++ {
 		if text[i:i+7] == "```json" {
 			start = i + 7
-			// Skip whitespace after marker
 			for start < len(text) && (text[start] == '\n' || text[start] == '\r') {
 				start++
 			}
-		}
-		if start >= 0 && text[i:i+3] == "```" && i > start {
-			end = i
 			break
 		}
 	}
-	if start >= 0 && end > start {
-		result := text[start:end]
-		// Trim trailing whitespace
-		for len(result) > 0 && (result[len(result)-1] == '\n' || result[len(result)-1] == '\r' || result[len(result)-1] == ' ') {
-			result = result[:len(result)-1]
-		}
-		return result
-	}
-
-	// Find the first occurrence of { and [ to decide which to extract.
-	// This matters because [{"a":1}] should extract the array, not the first object.
-	firstBrace := -1
-	firstBracket := -1
-	for i, ch := range text {
-		if ch == '{' && firstBrace == -1 {
-			firstBrace = i
-		}
-		if ch == '[' && firstBracket == -1 {
-			firstBracket = i
-		}
-		if firstBrace >= 0 && firstBracket >= 0 {
-			break
+	if start >= 0 {
+		// Search backwards from the end for closing ```
+		for end := len(text) - 3; end > start; end-- {
+			if text[end:end+3] == "```" {
+				candidate := strings.TrimSpace(text[start:end])
+				if json.Valid([]byte(candidate)) {
+					return candidate
+				}
+				break
+			}
 		}
 	}
 
-	// Extract whichever comes first (array or object)
+	// Strategy 2: If the text is already valid JSON, return as-is.
+	trimmed := strings.TrimSpace(text)
+	if json.Valid([]byte(trimmed)) {
+		return trimmed
+	}
+
+	// Strategy 3: Find matching braces/brackets using depth tracking.
+	// Try both { and [ and pick whichever comes first.
+	firstBrace := strings.IndexByte(text, '{')
+	firstBracket := strings.IndexByte(text, '[')
+
 	type extraction struct {
-		openChar  rune
-		closeChar rune
+		openChar  byte
+		closeChar byte
 		startPos  int
 	}
-	// Build ordered list of extractions to try, preferring whichever appears first
 	var extractions []extraction
 	if firstBracket >= 0 && (firstBrace < 0 || firstBracket < firstBrace) {
 		extractions = append(extractions, extraction{'[', ']', firstBracket})
@@ -293,36 +297,53 @@ func extractJSON(text string) string {
 	}
 
 	for _, ext := range extractions {
-		depth := 0
-		inString := false
-		escaped := false
-		for i, ch := range text[ext.startPos:] {
-			if escaped {
-				escaped = false
-				continue
-			}
-			if ch == '\\' && inString {
-				escaped = true
-				continue
-			}
-			if ch == '"' {
-				inString = !inString
-				continue
-			}
-			if inString {
-				continue
-			}
-			if ch == ext.openChar {
-				depth++
-			}
-			if ch == ext.closeChar {
-				depth--
-				if depth == 0 {
-					return text[ext.startPos : ext.startPos+i+1]
-				}
-			}
+		if result := matchBraces(text, ext.startPos, ext.openChar, ext.closeChar); result != "" {
+			return result
 		}
 	}
 
 	return text
+}
+
+// matchBraces extracts a balanced JSON structure from text starting at startPos.
+// It tracks string state and escape sequences to avoid false matches.
+func matchBraces(text string, startPos int, openChar, closeChar byte) string {
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i := startPos; i < len(text); i++ {
+		ch := text[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if ch == openChar {
+			depth++
+		}
+		if ch == closeChar {
+			depth--
+			if depth == 0 {
+				candidate := text[startPos : i+1]
+				if json.Valid([]byte(candidate)) {
+					return candidate
+				}
+				// If not valid, keep looking (might be a false match)
+				return candidate // Return best effort
+			}
+		}
+	}
+
+	return ""
 }

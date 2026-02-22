@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/matthewdriscoll/infraplane/internal/compliance"
 	"github.com/matthewdriscoll/infraplane/internal/service"
 )
 
@@ -14,8 +15,10 @@ func NewRouter(
 	resSvc *service.ResourceService,
 	planSvc *service.PlannerService,
 	depSvc *service.DeploymentService,
+	infraSvc *service.InfraService,
 	graphSvc *service.GraphService,
 	discSvc *service.DiscoveryService,
+	complianceRegistry *compliance.Registry,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -23,12 +26,14 @@ func NewRouter(
 	r.Use(CORSMiddleware())
 	r.Use(LoggingMiddleware)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.SetHeader("Content-Type", "application/json"))
 
-	h := NewHandlers(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc)
+	h := NewHandlers(appSvc, resSvc, planSvc, depSvc, infraSvc, graphSvc, discSvc, complianceRegistry)
 
 	// Routes
 	r.Route("/api", func(r chi.Router) {
+		// Compliance
+		r.Get("/compliance/frameworks", h.ListComplianceFrameworks)
+
 		// Applications
 		r.Post("/applications/onboard", h.OnboardApplication)
 		r.Post("/applications", h.RegisterApplication)
@@ -63,6 +68,9 @@ func NewRouter(
 		r.Get("/applications/{name}/deployments", h.ListDeployments)
 		r.Get("/applications/{name}/deployments/latest", h.GetLatestDeployment)
 		r.Get("/deployments/{id}", h.GetDeploymentStatus)
+
+		// Deployment SSE stream (real-time execution logs)
+		r.Get("/deployments/{id}/stream", h.DeployStream)
 	})
 
 	// Health check

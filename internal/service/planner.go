@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/google/uuid"
+	"github.com/matthewdriscoll/infraplane/internal/compliance"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 	"github.com/matthewdriscoll/infraplane/internal/llm"
 	"github.com/matthewdriscoll/infraplane/internal/repository"
@@ -12,19 +14,21 @@ import (
 
 // PlannerService handles LLM-powered hosting and migration planning.
 type PlannerService struct {
-	plans     repository.PlanRepo
-	apps      repository.ApplicationRepo
-	resources repository.ResourceRepo
-	llm       llm.Client
+	plans      repository.PlanRepo
+	apps       repository.ApplicationRepo
+	resources  repository.ResourceRepo
+	llm        llm.Client
+	compliance *compliance.Registry
 }
 
 // NewPlannerService creates a new PlannerService.
-func NewPlannerService(plans repository.PlanRepo, apps repository.ApplicationRepo, resources repository.ResourceRepo, llmClient llm.Client) *PlannerService {
+func NewPlannerService(plans repository.PlanRepo, apps repository.ApplicationRepo, resources repository.ResourceRepo, llmClient llm.Client, complianceRegistry *compliance.Registry) *PlannerService {
 	return &PlannerService{
-		plans:     plans,
-		apps:      apps,
-		resources: resources,
-		llm:       llmClient,
+		plans:      plans,
+		apps:       apps,
+		resources:  resources,
+		llm:        llmClient,
+		compliance: complianceRegistry,
 	}
 }
 
@@ -40,7 +44,38 @@ func (s *PlannerService) GenerateHostingPlan(ctx context.Context, appID uuid.UUI
 		return domain.InfrastructurePlan{}, fmt.Errorf("list resources: %w", err)
 	}
 
-	result, err := s.llm.GenerateHostingPlan(ctx, app, resources)
+	// Build compliance context filtered to only the resource kinds this app actually has.
+	// This avoids bloating the prompt with irrelevant rules (e.g. Compute Engine VM rules
+	// when the app only uses Cloud Run + Cloud SQL).
+	var complianceContext string
+	if len(app.ComplianceFrameworks) > 0 && s.compliance != nil {
+		// Collect unique resource kinds present in this application
+		kindSet := make(map[domain.ResourceKind]bool, len(resources))
+		for _, r := range resources {
+			kindSet[r.Kind] = true
+		}
+
+		var filteredRules []compliance.Rule
+		allRules := s.compliance.GetRules(app.ComplianceFrameworks)
+		for _, rule := range allRules {
+			// Keep the rule if ANY of its target resource kinds matches an app resource
+			for _, rk := range rule.ResourceKinds {
+				if kindSet[rk] {
+					filteredRules = append(filteredRules, rule)
+					break
+				}
+			}
+		}
+
+		log.Printf("[planner] compliance: %d/%d rules relevant to %d resource kinds",
+			len(filteredRules), len(allRules), len(kindSet))
+
+		if len(filteredRules) > 0 {
+			complianceContext = s.compliance.FormatRulesForPrompt(filteredRules)
+		}
+	}
+
+	result, err := s.llm.GenerateHostingPlan(ctx, app, resources, complianceContext)
 	if err != nil {
 		return domain.InfrastructurePlan{}, fmt.Errorf("generate hosting plan: %w", err)
 	}

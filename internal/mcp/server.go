@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/matthewdriscoll/infraplane/internal/compliance"
 	"github.com/matthewdriscoll/infraplane/internal/service"
 )
 
@@ -13,6 +14,7 @@ func NewServer(
 	depSvc *service.DeploymentService,
 	graphSvc *service.GraphService,
 	discSvc *service.DiscoveryService,
+	complianceRegistry *compliance.Registry,
 ) *server.MCPServer {
 	s := server.NewMCPServer(
 		"infraplane",
@@ -21,7 +23,7 @@ func NewServer(
 		server.WithRecovery(),
 	)
 
-	handlers := NewToolHandlers(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc)
+	handlers := NewToolHandlers(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc, complianceRegistry)
 	handlers.RegisterAll(s)
 
 	return s

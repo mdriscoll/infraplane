@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/matthewdriscoll/infraplane/internal/compliance"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 	"github.com/matthewdriscoll/infraplane/internal/llm"
 	"github.com/matthewdriscoll/infraplane/internal/repository"
@@ -12,17 +13,19 @@ import (
 
 // ResourceService handles resource management with LLM-powered analysis.
 type ResourceService struct {
-	resources repository.ResourceRepo
-	apps      repository.ApplicationRepo
-	llm       llm.Client
+	resources  repository.ResourceRepo
+	apps       repository.ApplicationRepo
+	llm        llm.Client
+	compliance *compliance.Registry
 }
 
 // NewResourceService creates a new ResourceService.
-func NewResourceService(resources repository.ResourceRepo, apps repository.ApplicationRepo, llmClient llm.Client) *ResourceService {
+func NewResourceService(resources repository.ResourceRepo, apps repository.ApplicationRepo, llmClient llm.Client, complianceRegistry *compliance.Registry) *ResourceService {
 	return &ResourceService{
-		resources: resources,
-		apps:      apps,
-		llm:       llmClient,
+		resources:  resources,
+		apps:       apps,
+		llm:        llmClient,
+		compliance: complianceRegistry,
 	}
 }
 
@@ -75,7 +78,29 @@ func (s *ResourceService) GenerateTerraformHCL(ctx context.Context, resourceID u
 		return "", fmt.Errorf("get resource: %w", err)
 	}
 
-	result, err := s.llm.GenerateTerraformHCL(ctx, resource, provider)
+	// Build compliance context filtered to this specific resource
+	var complianceContext string
+	if s.compliance != nil {
+		app, err := s.apps.GetByID(ctx, resource.ApplicationID)
+		if err == nil && len(app.ComplianceFrameworks) > 0 {
+			// Determine the service name for more precise rule filtering
+			var serviceName string
+			if mapping, ok := resource.ProviderMappings[provider]; ok {
+				serviceName = mapping.ServiceName
+			}
+			rules := s.compliance.GetRulesForResource(
+				app.ComplianceFrameworks,
+				provider,
+				resource.Kind,
+				serviceName,
+			)
+			if len(rules) > 0 {
+				complianceContext = s.compliance.FormatRulesForPrompt(rules)
+			}
+		}
+	}
+
+	result, err := s.llm.GenerateTerraformHCL(ctx, resource, provider, complianceContext)
 	if err != nil {
 		return "", fmt.Errorf("generate terraform HCL: %w", err)
 	}

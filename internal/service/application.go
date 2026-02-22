@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/matthewdriscoll/infraplane/internal/analyzer"
+	"github.com/matthewdriscoll/infraplane/internal/compliance"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 	"github.com/matthewdriscoll/infraplane/internal/llm"
 	"github.com/matthewdriscoll/infraplane/internal/repository"
@@ -15,18 +16,21 @@ import (
 
 // ApplicationService handles application lifecycle operations.
 type ApplicationService struct {
-	apps      repository.ApplicationRepo
-	resources repository.ResourceRepo
-	llm       llm.Client
+	apps       repository.ApplicationRepo
+	resources  repository.ResourceRepo
+	llm        llm.Client
+	compliance *compliance.Registry
 }
 
 // NewApplicationService creates a new ApplicationService.
 // The resources and llmClient params are optional — pass nil to skip auto-detection.
-func NewApplicationService(apps repository.ApplicationRepo, resources repository.ResourceRepo, llmClient llm.Client) *ApplicationService {
+// The compliance registry is optional — pass nil to skip compliance validation.
+func NewApplicationService(apps repository.ApplicationRepo, resources repository.ResourceRepo, llmClient llm.Client, complianceRegistry *compliance.Registry) *ApplicationService {
 	return &ApplicationService{
-		apps:      apps,
-		resources: resources,
-		llm:       llmClient,
+		apps:       apps,
+		resources:  resources,
+		llm:        llmClient,
+		compliance: complianceRegistry,
 	}
 }
 
@@ -41,8 +45,17 @@ type RegisterOpts struct {
 // client is configured, it analyzes the codebase and auto-detects resources.
 // If opts.UploadedFiles is provided (browser upload flow), those files are
 // analyzed instead of reading from the filesystem.
-func (s *ApplicationService) Register(ctx context.Context, name, description, gitRepoURL, sourcePath string, provider domain.CloudProvider, opts *RegisterOpts) (domain.Application, error) {
+// complianceFrameworks is an optional list of framework IDs (e.g. "cis_gcp_v4").
+func (s *ApplicationService) Register(ctx context.Context, name, description, gitRepoURL, sourcePath string, provider domain.CloudProvider, complianceFrameworks []string, opts *RegisterOpts) (domain.Application, error) {
+	// Validate compliance frameworks if provided
+	if len(complianceFrameworks) > 0 && s.compliance != nil {
+		if err := s.compliance.ValidateFrameworks(complianceFrameworks); err != nil {
+			return domain.Application{}, domain.ErrValidation(err.Error())
+		}
+	}
+
 	app := domain.NewApplication(name, description, gitRepoURL, sourcePath, provider)
+	app.ComplianceFrameworks = complianceFrameworks
 	if err := app.Validate(); err != nil {
 		return domain.Application{}, err
 	}
@@ -212,11 +225,12 @@ func (s *ApplicationService) Onboard(
 	ctx context.Context,
 	name, description, sourcePath string,
 	provider domain.CloudProvider,
+	complianceFrameworks []string,
 	opts *RegisterOpts,
 	planner *PlannerService,
 ) (OnboardResult, error) {
 	// Step 1: Register the application (includes auto-detect resources)
-	app, err := s.Register(ctx, name, description, "", sourcePath, provider, opts)
+	app, err := s.Register(ctx, name, description, "", sourcePath, provider, complianceFrameworks, opts)
 	if err != nil {
 		return OnboardResult{}, fmt.Errorf("register: %w", err)
 	}

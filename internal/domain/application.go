@@ -17,15 +17,16 @@ const (
 
 // Application represents a registered application in Infraplane.
 type Application struct {
-	ID          uuid.UUID     `json:"id"`
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	GitRepoURL  string        `json:"git_repo_url"`
-	SourcePath  string        `json:"source_path"`
-	Provider    CloudProvider `json:"provider"`
-	Status      AppStatus     `json:"status"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	ID                   uuid.UUID     `json:"id"`
+	Name                 string        `json:"name"`
+	Description          string        `json:"description"`
+	GitRepoURL           string        `json:"git_repo_url"`
+	SourcePath           string        `json:"source_path"`
+	Provider             CloudProvider `json:"provider"`
+	Status               AppStatus     `json:"status"`
+	ComplianceFrameworks []string      `json:"compliance_frameworks"`
+	CreatedAt            time.Time     `json:"created_at"`
+	UpdatedAt            time.Time     `json:"updated_at"`
 }
 
 // NewApplication creates a new Application in draft status.

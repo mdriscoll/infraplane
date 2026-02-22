@@ -15,7 +15,7 @@ func TestResourceService_AddFromDescription(t *testing.T) {
 	appRepo := mock.NewApplicationRepo()
 	resRepo := mock.NewResourceRepo()
 	mockLLM := &llm.MockClient{}
-	svc := NewResourceService(resRepo, appRepo, mockLLM)
+	svc := NewResourceService(resRepo, appRepo, mockLLM, nil)
 	ctx := context.Background()
 
 	// Create a parent app
@@ -85,7 +85,7 @@ func TestResourceService_ListByApplication(t *testing.T) {
 	appRepo := mock.NewApplicationRepo()
 	resRepo := mock.NewResourceRepo()
 	mockLLM := &llm.MockClient{}
-	svc := NewResourceService(resRepo, appRepo, mockLLM)
+	svc := NewResourceService(resRepo, appRepo, mockLLM, nil)
 	ctx := context.Background()
 
 	app := domain.NewApplication("list-test", "", "", "", domain.ProviderAWS)
@@ -107,7 +107,7 @@ func TestResourceService_Remove(t *testing.T) {
 	appRepo := mock.NewApplicationRepo()
 	resRepo := mock.NewResourceRepo()
 	mockLLM := &llm.MockClient{}
-	svc := NewResourceService(resRepo, appRepo, mockLLM)
+	svc := NewResourceService(resRepo, appRepo, mockLLM, nil)
 	ctx := context.Background()
 
 	app := domain.NewApplication("remove-test", "", "", "", domain.ProviderAWS)

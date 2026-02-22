@@ -10,8 +10,17 @@ export interface Application {
   source_path: string
   provider: 'aws' | 'gcp'
   status: 'draft' | 'provisioned' | 'deployed'
+  compliance_frameworks: string[]
   created_at: string
   updated_at: string
+}
+
+export interface ComplianceFrameworkInfo {
+  id: string
+  name: string
+  version: string
+  provider: string
+  description: string
 }
 
 export interface Resource {
@@ -33,6 +42,7 @@ export interface ProviderResource {
 export interface Deployment {
   id: string
   application_id: string
+  plan_id?: string
   provider: string
   git_commit: string
   git_branch: string
@@ -139,6 +149,7 @@ export const registerApplication = (data: {
   git_repo_url?: string
   source_path?: string
   provider: string
+  compliance_frameworks?: string[]
   files?: { path: string; content: string }[]
 }) => request<Application>('/applications', { method: 'POST', body: JSON.stringify(data) })
 
@@ -147,6 +158,7 @@ export const onboardApplication = (data: {
   description?: string
   provider: string
   source_path?: string
+  compliance_frameworks?: string[]
   files?: { path: string; content: string }[]
 }) => request<OnboardResult>('/applications/onboard', {
   method: 'POST',
@@ -199,10 +211,14 @@ export const generateTerraformHCL = (resourceId: string, provider: string) =>
   })
 
 // Deployments
-export const deploy = (appName: string, gitBranch: string, gitCommit?: string) =>
+export const deploy = (appName: string, gitBranch: string, gitCommit?: string, planId?: string) =>
   request<Deployment>(`/applications/${appName}/deploy`, {
     method: 'POST',
-    body: JSON.stringify({ git_branch: gitBranch, git_commit: gitCommit || '' }),
+    body: JSON.stringify({
+      git_branch: gitBranch,
+      git_commit: gitCommit || '',
+      ...(planId ? { plan_id: planId } : {}),
+    }),
   })
 
 export const listDeployments = (appName: string) =>
@@ -224,3 +240,19 @@ export const getLatestGraph = (appName: string) =>
 // Live Resources
 export const getLiveResources = (appName: string) =>
   request<LiveResourceResult>(`/applications/${appName}/live-resources`, { method: 'POST' })
+
+// Compliance Frameworks
+export const listComplianceFrameworks = (provider?: string) =>
+  request<ComplianceFrameworkInfo[]>(`/compliance/frameworks${provider ? `?provider=${provider}` : ''}`)
+
+// Deployment Streaming
+export interface DeploymentEvent {
+  step: 'initializing' | 'generating_terraform' | 'validating' | 'applying' | 'complete' | 'failed'
+  message: string
+  timestamp: string
+  status: Deployment['status']
+  detail?: string
+}
+
+export const getDeploymentStreamUrl = (deploymentId: string) =>
+  `${API_BASE}/deployments/${deploymentId}/stream`

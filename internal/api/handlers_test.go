@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 	"github.com/matthewdriscoll/infraplane/internal/llm"
+	"github.com/matthewdriscoll/infraplane/internal/provider"
+	awsadapter "github.com/matthewdriscoll/infraplane/internal/provider/aws"
+	gcpadapter "github.com/matthewdriscoll/infraplane/internal/provider/gcp"
 	"github.com/matthewdriscoll/infraplane/internal/repository/mock"
 	"github.com/matthewdriscoll/infraplane/internal/service"
 )
@@ -22,14 +26,24 @@ func setupTestRouter() http.Handler {
 
 	graphRepo := mock.NewGraphRepo()
 
-	appSvc := service.NewApplicationService(appRepo, resRepo, mockLLM)
-	resSvc := service.NewResourceService(resRepo, appRepo, mockLLM)
-	planSvc := service.NewPlannerService(planRepo, appRepo, resRepo, mockLLM)
+	// Build provider registry for InfraService
+	providerRegistry := provider.NewRegistry()
+	providerRegistry.Register(awsadapter.NewAdapter(&awsadapter.Config{
+		Region: "us-east-1", AccessKeyID: "test", SecretAccessKey: "test",
+	}))
+	providerRegistry.Register(gcpadapter.NewAdapter(&gcpadapter.Config{
+		Project: "test-project", Region: "us-central1", CredentialsFile: "/dev/null",
+	}))
+
+	appSvc := service.NewApplicationService(appRepo, resRepo, mockLLM, nil)
+	resSvc := service.NewResourceService(resRepo, appRepo, mockLLM, nil)
+	planSvc := service.NewPlannerService(planRepo, appRepo, resRepo, mockLLM, nil)
 	depSvc := service.NewDeploymentService(depRepo, appRepo)
+	infraSvc := service.NewInfraService(appRepo, resRepo, depRepo, providerRegistry)
 	graphSvc := service.NewGraphService(graphRepo, appRepo, resRepo, mockLLM)
 	discSvc := service.NewDiscoveryService(appRepo, mockLLM, nil)
 
-	return NewRouter(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc)
+	return NewRouter(appSvc, resSvc, planSvc, depSvc, infraSvc, graphSvc, discSvc, nil)
 }
 
 func doRequest(router http.Handler, method, path string, body any) *httptest.ResponseRecorder {
@@ -399,6 +413,54 @@ func TestOnboardApplication(t *testing.T) {
 		})
 		if w.Code != http.StatusConflict {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
+		}
+	})
+}
+
+func TestDeployStream(t *testing.T) {
+	router := setupTestRouter()
+
+	// Register app and create a pending deployment
+	doRequest(router, "POST", "/api/applications", registerAppRequest{Name: "stream-app", Provider: "aws"})
+	depW := doRequest(router, "POST", "/api/applications/stream-app/deploy", deployRequest{
+		GitBranch: "main",
+		GitCommit: "abc123",
+	})
+	if depW.Code != http.StatusCreated {
+		t.Fatalf("deploy status = %d, want %d", depW.Code, http.StatusCreated)
+	}
+
+	var d domain.Deployment
+	json.NewDecoder(depW.Body).Decode(&d)
+
+	t.Run("streams SSE events", func(t *testing.T) {
+		w := doRequest(router, "GET", "/api/deployments/"+d.ID.String()+"/stream", nil)
+
+		if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+			t.Errorf("Content-Type = %q, want text/event-stream", ct)
+		}
+
+		body := w.Body.String()
+		if !strings.Contains(body, "data: ") {
+			t.Error("expected SSE data events in response body")
+		}
+		if !strings.Contains(body, `"step":"complete"`) {
+			t.Errorf("expected complete step in response, got:\n%s", body)
+		}
+	})
+
+	t.Run("non-pending deployment returns 409", func(t *testing.T) {
+		// The deployment above is now succeeded, so streaming should fail
+		w := doRequest(router, "GET", "/api/deployments/"+d.ID.String()+"/stream", nil)
+		if w.Code != http.StatusConflict {
+			t.Errorf("status = %d, want %d; body = %s", w.Code, http.StatusConflict, w.Body.String())
+		}
+	})
+
+	t.Run("invalid deployment ID returns 400", func(t *testing.T) {
+		w := doRequest(router, "GET", "/api/deployments/not-a-uuid/stream", nil)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 	})
 }

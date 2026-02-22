@@ -154,7 +154,7 @@ func TestResource_Validate(t *testing.T) {
 
 func TestNewDeployment(t *testing.T) {
 	appID := uuid.New()
-	d := NewDeployment(appID, ProviderAWS, "abc123", "main")
+	d := NewDeployment(appID, ProviderAWS, "abc123", "main", nil)
 
 	if d.ApplicationID != appID {
 		t.Errorf("ApplicationID = %v, want %v", d.ApplicationID, appID)
@@ -175,7 +175,7 @@ func TestDeployment_Validate(t *testing.T) {
 	}{
 		{
 			name:    "valid deployment",
-			d:       NewDeployment(uuid.New(), ProviderGCP, "abc123", "main"),
+			d:       NewDeployment(uuid.New(), ProviderGCP, "abc123", "main", nil),
 			wantErr: false,
 		},
 		{

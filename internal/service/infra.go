@@ -35,6 +35,12 @@ func NewInfraService(
 	}
 }
 
+// Apps returns the application repository used by this service.
+func (s *InfraService) Apps() repository.ApplicationRepo { return s.apps }
+
+// Providers returns the provider registry used by this service.
+func (s *InfraService) Providers() *provider.Registry { return s.providers }
+
 // GenerateTerraform generates a complete Terraform configuration for an application
 // on its configured provider. It aggregates HCL from all resource provider mappings.
 func (s *InfraService) GenerateTerraform(ctx context.Context, appID uuid.UUID) (string, error) {
@@ -76,7 +82,7 @@ func (s *InfraService) DeployInfrastructure(ctx context.Context, appID uuid.UUID
 	}
 
 	// Create deployment record
-	d := domain.NewDeployment(appID, app.Provider, gitCommit, gitBranch)
+	d := domain.NewDeployment(appID, app.Provider, gitCommit, gitBranch, nil)
 	d.TerraformPlan = config
 	if err := d.Validate(); err != nil {
 		return domain.Deployment{}, err

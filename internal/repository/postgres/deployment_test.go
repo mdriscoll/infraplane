@@ -25,7 +25,7 @@ func TestIntegrationDeploymentRepo(t *testing.T) {
 	}
 
 	t.Run("Create and GetByID", func(t *testing.T) {
-		d := domain.NewDeployment(app.ID, domain.ProviderAWS, "abc123def", "main")
+		d := domain.NewDeployment(app.ID, domain.ProviderAWS, "abc123def", "main", nil)
 		if err := repo.Create(ctx, d); err != nil {
 			t.Fatalf("Create() error = %v", err)
 		}
@@ -53,7 +53,7 @@ func TestIntegrationDeploymentRepo(t *testing.T) {
 	})
 
 	t.Run("Update status", func(t *testing.T) {
-		d := domain.NewDeployment(app.ID, domain.ProviderAWS, "def456", "feature-branch")
+		d := domain.NewDeployment(app.ID, domain.ProviderAWS, "def456", "feature-branch", nil)
 		if err := repo.Create(ctx, d); err != nil {
 			t.Fatalf("Create() error = %v", err)
 		}
@@ -90,7 +90,7 @@ func TestIntegrationDeploymentRepo(t *testing.T) {
 
 	t.Run("GetLatestByApplicationID", func(t *testing.T) {
 		// Create a newer deployment
-		d := domain.NewDeployment(app.ID, domain.ProviderAWS, "latest999", "main")
+		d := domain.NewDeployment(app.ID, domain.ProviderAWS, "latest999", "main", nil)
 		if err := repo.Create(ctx, d); err != nil {
 			t.Fatalf("Create() error = %v", err)
 		}

@@ -20,7 +20,7 @@ func TestDeploymentService_Deploy(t *testing.T) {
 	appRepo.Create(ctx, app)
 
 	t.Run("successful deploy", func(t *testing.T) {
-		d, err := svc.Deploy(ctx, app.ID, "abc123", "main")
+		d, err := svc.Deploy(ctx, app.ID, "abc123", "main", nil)
 		if err != nil {
 			t.Fatalf("Deploy() error = %v", err)
 		}
@@ -36,14 +36,14 @@ func TestDeploymentService_Deploy(t *testing.T) {
 	})
 
 	t.Run("app not found", func(t *testing.T) {
-		_, err := svc.Deploy(ctx, uuid.New(), "abc", "main")
+		_, err := svc.Deploy(ctx, uuid.New(), "abc", "main", nil)
 		if err == nil {
 			t.Fatal("expected error")
 		}
 	})
 
 	t.Run("missing branch", func(t *testing.T) {
-		_, err := svc.Deploy(ctx, app.ID, "abc", "")
+		_, err := svc.Deploy(ctx, app.ID, "abc", "", nil)
 		if err == nil {
 			t.Fatal("expected validation error")
 		}
@@ -59,7 +59,7 @@ func TestDeploymentService_GetStatus(t *testing.T) {
 	app := domain.NewApplication("status-app", "", "", "", domain.ProviderGCP)
 	appRepo.Create(ctx, app)
 
-	d, _ := svc.Deploy(ctx, app.ID, "abc", "main")
+	d, _ := svc.Deploy(ctx, app.ID, "abc", "main", nil)
 
 	t.Run("found", func(t *testing.T) {
 		got, err := svc.GetStatus(ctx, d.ID)
@@ -88,7 +88,7 @@ func TestDeploymentService_MarkSucceeded(t *testing.T) {
 	app := domain.NewApplication("succeed-app", "", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
-	d, _ := svc.Deploy(ctx, app.ID, "abc", "main")
+	d, _ := svc.Deploy(ctx, app.ID, "abc", "main", nil)
 
 	updated, err := svc.MarkSucceeded(ctx, d.ID, "terraform plan output")
 	if err != nil {
@@ -114,7 +114,7 @@ func TestDeploymentService_MarkFailed(t *testing.T) {
 	app := domain.NewApplication("fail-app", "", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
-	d, _ := svc.Deploy(ctx, app.ID, "abc", "main")
+	d, _ := svc.Deploy(ctx, app.ID, "abc", "main", nil)
 
 	updated, err := svc.MarkFailed(ctx, d.ID)
 	if err != nil {
@@ -137,12 +137,12 @@ func TestDeploymentService_GetLatest(t *testing.T) {
 	app := domain.NewApplication("latest-app", "", "", "", domain.ProviderAWS)
 	appRepo.Create(ctx, app)
 
-	first, _ := svc.Deploy(ctx, app.ID, "first", "main")
+	first, _ := svc.Deploy(ctx, app.ID, "first", "main", nil)
 	// Push the first deployment's timestamp back so "second" is clearly newer
 	first.StartedAt = first.StartedAt.Add(-time.Minute)
 	depRepo.Update(ctx, first)
 
-	second, _ := svc.Deploy(ctx, app.ID, "second", "main")
+	second, _ := svc.Deploy(ctx, app.ID, "second", "main", nil)
 
 	latest, err := svc.GetLatest(ctx, app.ID)
 	if err != nil {

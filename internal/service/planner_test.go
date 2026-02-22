@@ -15,7 +15,7 @@ func TestPlannerService_GenerateHostingPlan(t *testing.T) {
 	resRepo := mock.NewResourceRepo()
 	planRepo := mock.NewPlanRepo()
 	mockLLM := &llm.MockClient{}
-	svc := NewPlannerService(planRepo, appRepo, resRepo, mockLLM)
+	svc := NewPlannerService(planRepo, appRepo, resRepo, mockLLM, nil)
 	ctx := context.Background()
 
 	app := domain.NewApplication("hosting-test", "A web API", "", "", domain.ProviderAWS)
@@ -62,7 +62,7 @@ func TestPlannerService_GenerateMigrationPlan(t *testing.T) {
 	resRepo := mock.NewResourceRepo()
 	planRepo := mock.NewPlanRepo()
 	mockLLM := &llm.MockClient{}
-	svc := NewPlannerService(planRepo, appRepo, resRepo, mockLLM)
+	svc := NewPlannerService(planRepo, appRepo, resRepo, mockLLM, nil)
 	ctx := context.Background()
 
 	app := domain.NewApplication("migration-test", "A web API", "", "", domain.ProviderAWS)
@@ -111,7 +111,7 @@ func TestPlannerService_ListPlansByApplication(t *testing.T) {
 	resRepo := mock.NewResourceRepo()
 	planRepo := mock.NewPlanRepo()
 	mockLLM := &llm.MockClient{}
-	svc := NewPlannerService(planRepo, appRepo, resRepo, mockLLM)
+	svc := NewPlannerService(planRepo, appRepo, resRepo, mockLLM, nil)
 	ctx := context.Background()
 
 	app := domain.NewApplication("list-plans-test", "", "", "", domain.ProviderAWS)

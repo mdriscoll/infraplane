@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useOnboardApplication } from '../hooks/useApi'
+import { useOnboardApplication, useComplianceFrameworks } from '../hooks/useApi'
 import { pickAndReadDirectory, isDirectoryPickerSupported } from '../lib/directoryPicker'
 import type { FileContent } from '../lib/directoryPicker'
 import type { OnboardResult } from '../api/client'
 import ResourceList from '../components/ResourceList'
 import PlanViewer from '../components/PlanViewer'
+import Spinner from '../components/Spinner'
 
 type WizardStep = 'provider' | 'source' | 'processing' | 'results'
 
@@ -23,15 +24,6 @@ const PROGRESS_MESSAGES = [
   'Generating your hosting plan...',
   'Estimating costs...',
 ]
-
-function Spinner({ className = '' }: { className?: string }) {
-  return (
-    <svg className={`animate-spin h-5 w-5 ${className}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-    </svg>
-  )
-}
 
 function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
   const currentIdx = STEPS.findIndex((s) => s.key === currentStep)
@@ -86,6 +78,16 @@ export default function OnboardWizard() {
   const [pickedFiles, setPickedFiles] = useState<FileContent[] | null>(null)
   const [progressIdx, setProgressIdx] = useState(0)
   const [result, setResult] = useState<OnboardResult | null>(null)
+  const [selectedFrameworks, setSelectedFrameworks] = useState<string[]>([])
+
+  // Fetch compliance frameworks for the selected provider
+  const { data: frameworks } = useComplianceFrameworks(provider || undefined)
+
+  const toggleFramework = (id: string) => {
+    setSelectedFrameworks((prev) =>
+      prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]
+    )
+  }
 
   // Cycle progress messages during processing
   useEffect(() => {
@@ -118,6 +120,7 @@ export default function OnboardWizard() {
         name: name.trim(),
         description: description.trim() || undefined,
         provider,
+        compliance_frameworks: selectedFrameworks.length > 0 ? selectedFrameworks : undefined,
         files: pickedFiles || undefined,
       },
       {
@@ -139,6 +142,7 @@ export default function OnboardWizard() {
     setDescription('')
     setPickedFiles(null)
     setResult(null)
+    setSelectedFrameworks([])
     onboard.reset()
   }
 
@@ -199,6 +203,46 @@ export default function OnboardWizard() {
               )
             })}
           </div>
+          {/* Compliance frameworks (shown after provider selected) */}
+          {provider && frameworks && frameworks.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-gray-700">
+                Compliance Frameworks <span className="text-gray-400">(optional)</span>
+              </h3>
+              <p className="text-xs text-gray-400">
+                Select frameworks to enforce on generated infrastructure.
+              </p>
+              <div className="space-y-2">
+                {frameworks.map((fw) => {
+                  const isChecked = selectedFrameworks.includes(fw.id)
+                  return (
+                    <label
+                      key={fw.id}
+                      className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                        isChecked
+                          ? 'border-indigo-300 bg-indigo-50'
+                          : 'border-gray-200 bg-white hover:border-gray-300'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleFramework(fw.id)}
+                        className="mt-0.5 h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {fw.name} {fw.version}
+                        </div>
+                        <div className="text-xs text-gray-500">{fw.description}</div>
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end">
             <button
               onClick={() => setStep('source')}
@@ -348,6 +392,11 @@ export default function OnboardWizard() {
               <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
                 {result.application.provider.toUpperCase()}
               </span>
+              {result.application.compliance_frameworks?.map((fw) => (
+                <span key={fw} className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-50 text-green-700">
+                  {fw}
+                </span>
+              ))}
               <h2 className="text-xl font-bold text-gray-900">{result.application.name}</h2>
             </div>
             {result.application.description && (

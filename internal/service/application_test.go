@@ -16,11 +16,11 @@ import (
 
 func TestApplicationService_Register(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil)
 	ctx := context.Background()
 
 	t.Run("successful registration", func(t *testing.T) {
-		app, err := svc.Register(ctx, "my-app", "A test app", "https://github.com/test/repo", "", domain.ProviderAWS, nil)
+		app, err := svc.Register(ctx, "my-app", "A test app", "https://github.com/test/repo", "", domain.ProviderAWS, nil, nil)
 		if err != nil {
 			t.Fatalf("Register() error = %v", err)
 		}
@@ -36,7 +36,7 @@ func TestApplicationService_Register(t *testing.T) {
 	})
 
 	t.Run("validation error - empty name", func(t *testing.T) {
-		_, err := svc.Register(ctx, "", "desc", "", "", domain.ProviderAWS, nil)
+		_, err := svc.Register(ctx, "", "desc", "", "", domain.ProviderAWS, nil, nil)
 		if err == nil {
 			t.Fatal("expected validation error")
 		}
@@ -46,14 +46,14 @@ func TestApplicationService_Register(t *testing.T) {
 	})
 
 	t.Run("validation error - invalid provider", func(t *testing.T) {
-		_, err := svc.Register(ctx, "valid-name", "desc", "", "", domain.CloudProvider("azure"), nil)
+		_, err := svc.Register(ctx, "valid-name", "desc", "", "", domain.CloudProvider("azure"), nil, nil)
 		if err == nil {
 			t.Fatal("expected validation error")
 		}
 	})
 
 	t.Run("duplicate name", func(t *testing.T) {
-		_, err := svc.Register(ctx, "my-app", "duplicate", "", "", domain.ProviderGCP, nil)
+		_, err := svc.Register(ctx, "my-app", "duplicate", "", "", domain.ProviderGCP, nil, nil)
 		if err == nil {
 			t.Fatal("expected conflict error")
 		}
@@ -62,10 +62,10 @@ func TestApplicationService_Register(t *testing.T) {
 
 func TestApplicationService_Get(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil)
 	ctx := context.Background()
 
-	app, _ := svc.Register(ctx, "get-test", "desc", "", "", domain.ProviderAWS, nil)
+	app, _ := svc.Register(ctx, "get-test", "desc", "", "", domain.ProviderAWS, nil, nil)
 
 	t.Run("found", func(t *testing.T) {
 		got, err := svc.Get(ctx, app.ID)
@@ -87,10 +87,10 @@ func TestApplicationService_Get(t *testing.T) {
 
 func TestApplicationService_GetByName(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil)
 	ctx := context.Background()
 
-	svc.Register(ctx, "name-test", "desc", "", "", domain.ProviderGCP, nil)
+	svc.Register(ctx, "name-test", "desc", "", "", domain.ProviderGCP, nil, nil)
 
 	t.Run("found", func(t *testing.T) {
 		got, err := svc.GetByName(ctx, "name-test")
@@ -112,11 +112,11 @@ func TestApplicationService_GetByName(t *testing.T) {
 
 func TestApplicationService_List(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil)
 	ctx := context.Background()
 
-	svc.Register(ctx, "app-1", "", "", "", domain.ProviderAWS, nil)
-	svc.Register(ctx, "app-2", "", "", "", domain.ProviderGCP, nil)
+	svc.Register(ctx, "app-1", "", "", "", domain.ProviderAWS, nil, nil)
+	svc.Register(ctx, "app-2", "", "", "", domain.ProviderGCP, nil, nil)
 
 	apps, err := svc.List(ctx)
 	if err != nil {
@@ -129,10 +129,10 @@ func TestApplicationService_List(t *testing.T) {
 
 func TestApplicationService_UpdateStatus(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil)
 	ctx := context.Background()
 
-	app, _ := svc.Register(ctx, "status-test", "", "", "", domain.ProviderAWS, nil)
+	app, _ := svc.Register(ctx, "status-test", "", "", "", domain.ProviderAWS, nil, nil)
 
 	t.Run("update to provisioned", func(t *testing.T) {
 		updated, err := svc.UpdateStatus(ctx, app.ID, domain.AppStatusProvisioned)
@@ -154,10 +154,10 @@ func TestApplicationService_UpdateStatus(t *testing.T) {
 
 func TestApplicationService_Delete(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil)
 	ctx := context.Background()
 
-	app, _ := svc.Register(ctx, "delete-test", "", "", "", domain.ProviderAWS, nil)
+	app, _ := svc.Register(ctx, "delete-test", "", "", "", domain.ProviderAWS, nil, nil)
 
 	if err := svc.Delete(ctx, app.ID); err != nil {
 		t.Fatalf("Delete() error = %v", err)
@@ -176,7 +176,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 		appRepo := mock.NewApplicationRepo()
 		resRepo := mock.NewResourceRepo()
 		llmClient := &llm.MockClient{}
-		svc := NewApplicationService(appRepo, resRepo, llmClient)
+		svc := NewApplicationService(appRepo, resRepo, llmClient, nil)
 
 		// Create a temp dir with infrastructure files
 		tmpDir, err := os.MkdirTemp("", "infraplane-autodetect-*")
@@ -187,7 +187,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 		os.WriteFile(filepath.Join(tmpDir, "docker-compose.yml"), []byte("services:\n  db:\n    image: postgres:16\n"), 0644)
 		os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"dependencies": {"pg": "^8.0"}}`), 0644)
 
-		app, err := svc.Register(ctx, "auto-app", "test", "", tmpDir, domain.ProviderAWS, nil)
+		app, err := svc.Register(ctx, "auto-app", "test", "", tmpDir, domain.ProviderAWS, nil, nil)
 		if err != nil {
 			t.Fatalf("Register() error = %v", err)
 		}
@@ -206,9 +206,9 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 		appRepo := mock.NewApplicationRepo()
 		resRepo := mock.NewResourceRepo()
 		llmClient := &llm.MockClient{}
-		svc := NewApplicationService(appRepo, resRepo, llmClient)
+		svc := NewApplicationService(appRepo, resRepo, llmClient, nil)
 
-		app, err := svc.Register(ctx, "no-source", "test", "", "", domain.ProviderAWS, nil)
+		app, err := svc.Register(ctx, "no-source", "test", "", "", domain.ProviderAWS, nil, nil)
 		if err != nil {
 			t.Fatalf("Register() error = %v", err)
 		}
@@ -224,7 +224,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 
 	t.Run("register with nil LLM skips auto-detection", func(t *testing.T) {
 		appRepo := mock.NewApplicationRepo()
-		svc := NewApplicationService(appRepo, nil, nil)
+		svc := NewApplicationService(appRepo, nil, nil, nil)
 
 		tmpDir, err := os.MkdirTemp("", "infraplane-no-llm-*")
 		if err != nil {
@@ -233,7 +233,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 		os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/app"), 0644)
 
-		app, err := svc.Register(ctx, "no-llm-app", "test", "", tmpDir, domain.ProviderAWS, nil)
+		app, err := svc.Register(ctx, "no-llm-app", "test", "", tmpDir, domain.ProviderAWS, nil, nil)
 		if err != nil {
 			t.Fatalf("Register() error = %v", err)
 		}
@@ -246,9 +246,9 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 		appRepo := mock.NewApplicationRepo()
 		resRepo := mock.NewResourceRepo()
 		llmClient := &llm.MockClient{}
-		svc := NewApplicationService(appRepo, resRepo, llmClient)
+		svc := NewApplicationService(appRepo, resRepo, llmClient, nil)
 
-		app, err := svc.Register(ctx, "upload-app", "test", "", "", domain.ProviderAWS, &RegisterOpts{
+		app, err := svc.Register(ctx, "upload-app", "test", "", "", domain.ProviderAWS, nil, &RegisterOpts{
 			UploadedFiles: &analyzer.CodeContext{
 				Files:   []analyzer.FileContent{{Path: "docker-compose.yml", Content: "services:\n  db:\n    image: postgres"}},
 				Summary: "Uploaded from browser",
@@ -275,7 +275,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 				return nil, fmt.Errorf("LLM API error")
 			},
 		}
-		svc := NewApplicationService(appRepo, resRepo, llmClient)
+		svc := NewApplicationService(appRepo, resRepo, llmClient, nil)
 
 		tmpDir, err := os.MkdirTemp("", "infraplane-llm-error-*")
 		if err != nil {
@@ -284,7 +284,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 		os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte("FROM node:20"), 0644)
 
-		app, err := svc.Register(ctx, "error-app", "test", "", tmpDir, domain.ProviderAWS, nil)
+		app, err := svc.Register(ctx, "error-app", "test", "", tmpDir, domain.ProviderAWS, nil, nil)
 		if err != nil {
 			t.Fatalf("Register() should succeed even if analysis fails, got error = %v", err)
 		}
@@ -311,10 +311,10 @@ func TestApplicationService_Onboard(t *testing.T) {
 		resRepo := mock.NewResourceRepo()
 		planRepo := mock.NewPlanRepo()
 		llmClient := &llm.MockClient{}
-		appSvc := NewApplicationService(appRepo, resRepo, llmClient)
-		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient)
+		appSvc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient, nil)
 
-		result, err := appSvc.Onboard(ctx, "onboard-app", "test app", "", domain.ProviderAWS, &RegisterOpts{
+		result, err := appSvc.Onboard(ctx, "onboard-app", "test app", "", domain.ProviderAWS, nil, &RegisterOpts{
 			UploadedFiles: &analyzer.CodeContext{
 				Files:   []analyzer.FileContent{{Path: "docker-compose.yml", Content: "services:\n  db:\n    image: postgres"}},
 				Summary: "Uploaded from onboarding wizard",
@@ -348,14 +348,14 @@ func TestApplicationService_Onboard(t *testing.T) {
 		resRepo := mock.NewResourceRepo()
 		planRepo := mock.NewPlanRepo()
 		llmClient := &llm.MockClient{
-			GenerateHostingPlanFn: func(ctx context.Context, app domain.Application, resources []domain.Resource) (llm.HostingPlanResult, error) {
+			GenerateHostingPlanFn: func(ctx context.Context, app domain.Application, resources []domain.Resource, complianceContext string) (llm.HostingPlanResult, error) {
 				return llm.HostingPlanResult{}, fmt.Errorf("LLM timeout")
 			},
 		}
-		appSvc := NewApplicationService(appRepo, resRepo, llmClient)
-		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient)
+		appSvc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient, nil)
 
-		result, err := appSvc.Onboard(ctx, "onboard-no-plan", "test", "", domain.ProviderGCP, &RegisterOpts{
+		result, err := appSvc.Onboard(ctx, "onboard-no-plan", "test", "", domain.ProviderGCP, nil, &RegisterOpts{
 			UploadedFiles: &analyzer.CodeContext{
 				Files:   []analyzer.FileContent{{Path: "Dockerfile", Content: "FROM node:20"}},
 				Summary: "Uploaded",
@@ -383,17 +383,17 @@ func TestApplicationService_Onboard(t *testing.T) {
 		resRepo := mock.NewResourceRepo()
 		planRepo := mock.NewPlanRepo()
 		llmClient := &llm.MockClient{}
-		appSvc := NewApplicationService(appRepo, resRepo, llmClient)
-		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient)
+		appSvc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient, nil)
 
 		// Register first
-		_, err := appSvc.Onboard(ctx, "dup-app", "first", "", domain.ProviderAWS, nil, planSvc)
+		_, err := appSvc.Onboard(ctx, "dup-app", "first", "", domain.ProviderAWS, nil, nil, planSvc)
 		if err != nil {
 			t.Fatalf("first Onboard() error = %v", err)
 		}
 
 		// Try same name again
-		_, err = appSvc.Onboard(ctx, "dup-app", "second", "", domain.ProviderAWS, nil, planSvc)
+		_, err = appSvc.Onboard(ctx, "dup-app", "second", "", domain.ProviderAWS, nil, nil, planSvc)
 		if err == nil {
 			t.Fatal("expected error for duplicate name")
 		}
@@ -404,10 +404,10 @@ func TestApplicationService_Onboard(t *testing.T) {
 		resRepo := mock.NewResourceRepo()
 		planRepo := mock.NewPlanRepo()
 		llmClient := &llm.MockClient{}
-		appSvc := NewApplicationService(appRepo, resRepo, llmClient)
-		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient)
+		appSvc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient, nil)
 
-		_, err := appSvc.Onboard(ctx, "", "desc", "", domain.ProviderAWS, nil, planSvc)
+		_, err := appSvc.Onboard(ctx, "", "desc", "", domain.ProviderAWS, nil, nil, planSvc)
 		if err == nil {
 			t.Fatal("expected validation error for empty name")
 		}

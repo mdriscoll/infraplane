@@ -131,7 +131,7 @@ func TestMockClient_GenerateHostingPlan(t *testing.T) {
 	ctx := context.Background()
 	app := domain.Application{ID: uuid.New(), Name: "test-app", Provider: domain.ProviderAWS}
 
-	result, err := mock.GenerateHostingPlan(ctx, app, nil)
+	result, err := mock.GenerateHostingPlan(ctx, app, nil, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

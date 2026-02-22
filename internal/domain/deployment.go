@@ -20,6 +20,7 @@ const (
 type Deployment struct {
 	ID            uuid.UUID        `json:"id"`
 	ApplicationID uuid.UUID        `json:"application_id"`
+	PlanID        *uuid.UUID       `json:"plan_id,omitempty"`
 	Provider      CloudProvider    `json:"provider"`
 	GitCommit     string           `json:"git_commit"`
 	GitBranch     string           `json:"git_branch"`
@@ -30,16 +31,38 @@ type Deployment struct {
 }
 
 // NewDeployment creates a new pending deployment.
-func NewDeployment(appID uuid.UUID, provider CloudProvider, gitCommit, gitBranch string) Deployment {
+func NewDeployment(appID uuid.UUID, provider CloudProvider, gitCommit, gitBranch string, planID *uuid.UUID) Deployment {
 	return Deployment{
 		ID:            uuid.New(),
 		ApplicationID: appID,
+		PlanID:        planID,
 		Provider:      provider,
 		GitCommit:     gitCommit,
 		GitBranch:     gitBranch,
 		Status:        DeploymentPending,
 		StartedAt:     time.Now().UTC(),
 	}
+}
+
+// DeploymentStep represents a named stage in the deployment pipeline.
+type DeploymentStep string
+
+const (
+	StepInitializing        DeploymentStep = "initializing"
+	StepGeneratingTerraform DeploymentStep = "generating_terraform"
+	StepValidating          DeploymentStep = "validating"
+	StepApplying            DeploymentStep = "applying"
+	StepComplete            DeploymentStep = "complete"
+	StepFailed              DeploymentStep = "failed"
+)
+
+// DeploymentEvent is a single log entry streamed to the client during deployment execution.
+type DeploymentEvent struct {
+	Step      DeploymentStep   `json:"step"`
+	Message   string           `json:"message"`
+	Timestamp time.Time        `json:"timestamp"`
+	Status    DeploymentStatus `json:"status"`
+	Detail    string           `json:"detail,omitempty"`
 }
 
 // Validate checks that the deployment has valid required fields.

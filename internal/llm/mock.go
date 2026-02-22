@@ -13,10 +13,10 @@ import (
 type MockClient struct {
 	AnalyzeResourceNeedFn        func(ctx context.Context, description string, provider domain.CloudProvider) (ResourceRecommendation, error)
 	AnalyzeCodebaseFn            func(ctx context.Context, codeCtx analyzer.CodeContext, provider domain.CloudProvider) ([]ResourceRecommendation, error)
-	GenerateHostingPlanFn        func(ctx context.Context, app domain.Application, resources []domain.Resource) (HostingPlanResult, error)
+	GenerateHostingPlanFn        func(ctx context.Context, app domain.Application, resources []domain.Resource, complianceContext string) (HostingPlanResult, error)
 	GenerateMigrationPlanFn      func(ctx context.Context, app domain.Application, resources []domain.Resource, from, to domain.CloudProvider) (MigrationPlanResult, error)
 	GenerateGraphFn              func(ctx context.Context, app domain.Application, resources []domain.Resource) (GraphResult, error)
-	GenerateTerraformHCLFn       func(ctx context.Context, resource domain.Resource, provider domain.CloudProvider) (TerraformHCLResult, error)
+	GenerateTerraformHCLFn       func(ctx context.Context, resource domain.Resource, provider domain.CloudProvider, complianceContext string) (TerraformHCLResult, error)
 	GenerateDiscoveryCommandsFn  func(ctx context.Context, app domain.Application, codeCtx analyzer.CodeContext) (DiscoveryCommandResult, error)
 	ParseDiscoveryOutputFn       func(ctx context.Context, app domain.Application, outputs []CommandOutput) (LiveResourceParseResult, error)
 }
@@ -35,9 +35,9 @@ func (m *MockClient) AnalyzeCodebase(ctx context.Context, codeCtx analyzer.CodeC
 	return defaultCodebaseRecommendations(), nil
 }
 
-func (m *MockClient) GenerateHostingPlan(ctx context.Context, app domain.Application, resources []domain.Resource) (HostingPlanResult, error) {
+func (m *MockClient) GenerateHostingPlan(ctx context.Context, app domain.Application, resources []domain.Resource, complianceContext string) (HostingPlanResult, error) {
 	if m.GenerateHostingPlanFn != nil {
-		return m.GenerateHostingPlanFn(ctx, app, resources)
+		return m.GenerateHostingPlanFn(ctx, app, resources, complianceContext)
 	}
 	return defaultHostingPlan(), nil
 }
@@ -56,9 +56,9 @@ func (m *MockClient) GenerateGraph(ctx context.Context, app domain.Application, 
 	return defaultGraph(), nil
 }
 
-func (m *MockClient) GenerateTerraformHCL(ctx context.Context, resource domain.Resource, provider domain.CloudProvider) (TerraformHCLResult, error) {
+func (m *MockClient) GenerateTerraformHCL(ctx context.Context, resource domain.Resource, provider domain.CloudProvider, complianceContext string) (TerraformHCLResult, error) {
 	if m.GenerateTerraformHCLFn != nil {
-		return m.GenerateTerraformHCLFn(ctx, resource, provider)
+		return m.GenerateTerraformHCLFn(ctx, resource, provider, complianceContext)
 	}
 	return TerraformHCLResult{HCL: `resource "example" "mock" { name = "` + resource.Name + `" }`}, nil
 }

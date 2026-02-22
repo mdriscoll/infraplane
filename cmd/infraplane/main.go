@@ -11,8 +11,12 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/matthewdriscoll/infraplane/internal/api"
 	gcpcloud "github.com/matthewdriscoll/infraplane/internal/cloud/gcp"
+	"github.com/matthewdriscoll/infraplane/internal/compliance"
 	"github.com/matthewdriscoll/infraplane/internal/llm"
 	mcpserver "github.com/matthewdriscoll/infraplane/internal/mcp"
+	"github.com/matthewdriscoll/infraplane/internal/provider"
+	awsadapter "github.com/matthewdriscoll/infraplane/internal/provider/aws"
+	gcpadapter "github.com/matthewdriscoll/infraplane/internal/provider/gcp"
 	"github.com/matthewdriscoll/infraplane/internal/repository/mock"
 	"github.com/matthewdriscoll/infraplane/internal/repository/postgres"
 	"github.com/matthewdriscoll/infraplane/internal/service"
@@ -54,11 +58,21 @@ func main() {
 		defer assetClient.Close()
 	}
 
+	// Build compliance registry
+	complianceRegistry := compliance.NewRegistry()
+	log.Printf("Compliance registry loaded: %d frameworks", len(complianceRegistry.ListFrameworks()))
+
+	// Build provider registry
+	providerRegistry := provider.NewRegistry()
+	providerRegistry.Register(awsadapter.NewAdapter(nil))
+	providerRegistry.Register(gcpadapter.NewAdapter(nil))
+
 	// Build repositories and services
 	var appSvc *service.ApplicationService
 	var resSvc *service.ResourceService
 	var planSvc *service.PlannerService
 	var depSvc *service.DeploymentService
+	var infraSvc *service.InfraService
 	var graphSvc *service.GraphService
 	var discSvc *service.DiscoveryService
 
@@ -76,10 +90,11 @@ func main() {
 		planRepo := postgres.NewPlanRepo(pool)
 		graphRepo := postgres.NewGraphRepo(pool)
 
-		appSvc = service.NewApplicationService(appRepo, resRepo, llmClient)
-		resSvc = service.NewResourceService(resRepo, appRepo, llmClient)
-		planSvc = service.NewPlannerService(planRepo, appRepo, resRepo, llmClient)
+		appSvc = service.NewApplicationService(appRepo, resRepo, llmClient, complianceRegistry)
+		resSvc = service.NewResourceService(resRepo, appRepo, llmClient, complianceRegistry)
+		planSvc = service.NewPlannerService(planRepo, appRepo, resRepo, llmClient, complianceRegistry)
 		depSvc = service.NewDeploymentService(depRepo, appRepo)
+		infraSvc = service.NewInfraService(appRepo, resRepo, depRepo, providerRegistry)
 		graphSvc = service.NewGraphService(graphRepo, appRepo, resRepo, llmClient)
 		discSvc = service.NewDiscoveryService(appRepo, llmClient, assetClient)
 
@@ -92,10 +107,11 @@ func main() {
 		planRepo := mock.NewPlanRepo()
 		graphRepo := mock.NewGraphRepo()
 
-		appSvc = service.NewApplicationService(appRepo, resRepo, llmClient)
-		resSvc = service.NewResourceService(resRepo, appRepo, llmClient)
-		planSvc = service.NewPlannerService(planRepo, appRepo, resRepo, llmClient)
+		appSvc = service.NewApplicationService(appRepo, resRepo, llmClient, complianceRegistry)
+		resSvc = service.NewResourceService(resRepo, appRepo, llmClient, complianceRegistry)
+		planSvc = service.NewPlannerService(planRepo, appRepo, resRepo, llmClient, complianceRegistry)
 		depSvc = service.NewDeploymentService(depRepo, appRepo)
+		infraSvc = service.NewInfraService(appRepo, resRepo, depRepo, providerRegistry)
 		graphSvc = service.NewGraphService(graphRepo, appRepo, resRepo, llmClient)
 		discSvc = service.NewDiscoveryService(appRepo, llmClient, assetClient)
 
@@ -104,14 +120,14 @@ func main() {
 
 	if mode == "http" {
 		// HTTP REST API mode for the dashboard
-		router := api.NewRouter(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc)
+		router := api.NewRouter(appSvc, resSvc, planSvc, depSvc, infraSvc, graphSvc, discSvc, complianceRegistry)
 		log.Printf("Infraplane REST API starting on :%s...", port)
 		if err := http.ListenAndServe(":"+port, router); err != nil {
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	} else {
 		// Default: MCP server on stdio for Claude Code
-		mcpSrv := mcpserver.NewServer(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc)
+		mcpSrv := mcpserver.NewServer(appSvc, resSvc, planSvc, depSvc, graphSvc, discSvc, complianceRegistry)
 		log.Println("Infraplane MCP server starting on stdio...")
 		if err := server.ServeStdio(mcpSrv); err != nil {
 			log.Fatalf("MCP server error: %v", err)
