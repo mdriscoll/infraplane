@@ -333,7 +333,7 @@ func (h *ToolHandlers) handleDeploy(ctx context.Context, req gomcp.CallToolReque
 		planID = &id
 	}
 
-	d, err := h.deployments.Deploy(ctx, app.ID, gitCommit, gitBranch, planID)
+	d, err := h.deployments.Deploy(ctx, app.ID, gitCommit, gitBranch, planID, nil)
 	if err != nil {
 		return toolError(err), nil
 	}

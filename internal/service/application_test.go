@@ -16,7 +16,7 @@ import (
 
 func TestApplicationService_Register(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	t.Run("successful registration", func(t *testing.T) {
@@ -62,7 +62,7 @@ func TestApplicationService_Register(t *testing.T) {
 
 func TestApplicationService_Get(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	app, _ := svc.Register(ctx, "get-test", "desc", "", "", domain.ProviderAWS, nil, nil)
@@ -87,7 +87,7 @@ func TestApplicationService_Get(t *testing.T) {
 
 func TestApplicationService_GetByName(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	svc.Register(ctx, "name-test", "desc", "", "", domain.ProviderGCP, nil, nil)
@@ -112,7 +112,7 @@ func TestApplicationService_GetByName(t *testing.T) {
 
 func TestApplicationService_List(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	svc.Register(ctx, "app-1", "", "", "", domain.ProviderAWS, nil, nil)
@@ -129,7 +129,7 @@ func TestApplicationService_List(t *testing.T) {
 
 func TestApplicationService_UpdateStatus(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	app, _ := svc.Register(ctx, "status-test", "", "", "", domain.ProviderAWS, nil, nil)
@@ -154,7 +154,7 @@ func TestApplicationService_UpdateStatus(t *testing.T) {
 
 func TestApplicationService_Delete(t *testing.T) {
 	repo := mock.NewApplicationRepo()
-	svc := NewApplicationService(repo, nil, nil, nil)
+	svc := NewApplicationService(repo, nil, nil, nil, nil)
 	ctx := context.Background()
 
 	app, _ := svc.Register(ctx, "delete-test", "", "", "", domain.ProviderAWS, nil, nil)
@@ -176,7 +176,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 		appRepo := mock.NewApplicationRepo()
 		resRepo := mock.NewResourceRepo()
 		llmClient := &llm.MockClient{}
-		svc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		svc := NewApplicationService(appRepo, resRepo, nil, llmClient, nil)
 
 		// Create a temp dir with infrastructure files
 		tmpDir, err := os.MkdirTemp("", "infraplane-autodetect-*")
@@ -206,7 +206,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 		appRepo := mock.NewApplicationRepo()
 		resRepo := mock.NewResourceRepo()
 		llmClient := &llm.MockClient{}
-		svc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		svc := NewApplicationService(appRepo, resRepo, nil, llmClient, nil)
 
 		app, err := svc.Register(ctx, "no-source", "test", "", "", domain.ProviderAWS, nil, nil)
 		if err != nil {
@@ -224,7 +224,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 
 	t.Run("register with nil LLM skips auto-detection", func(t *testing.T) {
 		appRepo := mock.NewApplicationRepo()
-		svc := NewApplicationService(appRepo, nil, nil, nil)
+		svc := NewApplicationService(appRepo, nil, nil, nil, nil)
 
 		tmpDir, err := os.MkdirTemp("", "infraplane-no-llm-*")
 		if err != nil {
@@ -246,7 +246,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 		appRepo := mock.NewApplicationRepo()
 		resRepo := mock.NewResourceRepo()
 		llmClient := &llm.MockClient{}
-		svc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		svc := NewApplicationService(appRepo, resRepo, nil, llmClient, nil)
 
 		app, err := svc.Register(ctx, "upload-app", "test", "", "", domain.ProviderAWS, nil, &RegisterOpts{
 			UploadedFiles: &analyzer.CodeContext{
@@ -275,7 +275,7 @@ func TestApplicationService_AutoDetect(t *testing.T) {
 				return nil, fmt.Errorf("LLM API error")
 			},
 		}
-		svc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		svc := NewApplicationService(appRepo, resRepo, nil, llmClient, nil)
 
 		tmpDir, err := os.MkdirTemp("", "infraplane-llm-error-*")
 		if err != nil {
@@ -311,7 +311,7 @@ func TestApplicationService_Onboard(t *testing.T) {
 		resRepo := mock.NewResourceRepo()
 		planRepo := mock.NewPlanRepo()
 		llmClient := &llm.MockClient{}
-		appSvc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		appSvc := NewApplicationService(appRepo, resRepo, nil, llmClient, nil)
 		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient, nil)
 
 		result, err := appSvc.Onboard(ctx, "onboard-app", "test app", "", domain.ProviderAWS, nil, &RegisterOpts{
@@ -352,7 +352,7 @@ func TestApplicationService_Onboard(t *testing.T) {
 				return llm.HostingPlanResult{}, fmt.Errorf("LLM timeout")
 			},
 		}
-		appSvc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		appSvc := NewApplicationService(appRepo, resRepo, nil, llmClient, nil)
 		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient, nil)
 
 		result, err := appSvc.Onboard(ctx, "onboard-no-plan", "test", "", domain.ProviderGCP, nil, &RegisterOpts{
@@ -383,7 +383,7 @@ func TestApplicationService_Onboard(t *testing.T) {
 		resRepo := mock.NewResourceRepo()
 		planRepo := mock.NewPlanRepo()
 		llmClient := &llm.MockClient{}
-		appSvc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		appSvc := NewApplicationService(appRepo, resRepo, nil, llmClient, nil)
 		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient, nil)
 
 		// Register first
@@ -404,7 +404,7 @@ func TestApplicationService_Onboard(t *testing.T) {
 		resRepo := mock.NewResourceRepo()
 		planRepo := mock.NewPlanRepo()
 		llmClient := &llm.MockClient{}
-		appSvc := NewApplicationService(appRepo, resRepo, llmClient, nil)
+		appSvc := NewApplicationService(appRepo, resRepo, nil, llmClient, nil)
 		planSvc := NewPlannerService(planRepo, appRepo, resRepo, llmClient, nil)
 
 		_, err := appSvc.Onboard(ctx, "", "desc", "", domain.ProviderAWS, nil, nil, planSvc)

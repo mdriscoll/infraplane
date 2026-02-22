@@ -5,7 +5,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	gcpcloud "github.com/matthewdriscoll/infraplane/internal/cloud/gcp"
 	"github.com/matthewdriscoll/infraplane/internal/compliance"
+	"github.com/matthewdriscoll/infraplane/internal/credentials"
 	"github.com/matthewdriscoll/infraplane/internal/service"
 )
 
@@ -19,6 +21,8 @@ func NewRouter(
 	graphSvc *service.GraphService,
 	discSvc *service.DiscoveryService,
 	complianceRegistry *compliance.Registry,
+	gcpManager *gcpcloud.Manager,
+	credStore *credentials.Store,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -27,12 +31,18 @@ func NewRouter(
 	r.Use(LoggingMiddleware)
 	r.Use(middleware.Recoverer)
 
-	h := NewHandlers(appSvc, resSvc, planSvc, depSvc, infraSvc, graphSvc, discSvc, complianceRegistry)
+	h := NewHandlers(appSvc, resSvc, planSvc, depSvc, infraSvc, graphSvc, discSvc, complianceRegistry, gcpManager, credStore)
 
 	// Routes
 	r.Route("/api", func(r chi.Router) {
 		// Compliance
 		r.Get("/compliance/frameworks", h.ListComplianceFrameworks)
+
+		// GCP Projects & Credentials
+		r.Get("/gcp/projects", h.ListGCPProjects)
+		r.Post("/gcp/credentials", h.UploadGCPCredentials)
+		r.Get("/gcp/credentials", h.GetGCPCredentialStatus)
+		r.Delete("/gcp/credentials", h.DeleteGCPCredentials)
 
 		// Applications
 		r.Post("/applications/onboard", h.OnboardApplication)
@@ -51,6 +61,10 @@ func NewRouter(
 		r.Delete("/resources/{id}", h.RemoveResource)
 		r.Post("/resources/{id}/terraform", h.GenerateTerraformHCL)
 
+		// Analysis Runs
+		r.Get("/applications/{name}/analysis-runs", h.ListAnalysisRuns)
+		r.Get("/analysis-runs/{runId}/resources", h.ListResourcesByRun)
+
 		// Plans
 		r.Post("/applications/{name}/hosting-plan", h.GenerateHostingPlan)
 		r.Post("/applications/{name}/migration-plan", h.GenerateMigrationPlan)
@@ -65,12 +79,15 @@ func NewRouter(
 
 		// Deployments
 		r.Post("/applications/{name}/deploy", h.Deploy)
+		r.Post("/applications/{name}/validate-target", h.ValidateDeployTarget)
 		r.Get("/applications/{name}/deployments", h.ListDeployments)
 		r.Get("/applications/{name}/deployments/latest", h.GetLatestDeployment)
 		r.Get("/deployments/{id}", h.GetDeploymentStatus)
 
 		// Deployment SSE stream (real-time execution logs)
 		r.Get("/deployments/{id}/stream", h.DeployStream)
+		r.Get("/deployments/{id}/events", h.GetDeploymentEvents)
+		r.Get("/deployments/{id}/events/stream", h.DeployStreamReconnect)
 	})
 
 	// Health check

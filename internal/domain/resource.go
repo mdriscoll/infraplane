@@ -50,13 +50,14 @@ type ProviderResource struct {
 
 // Resource is a cloud-agnostic infrastructure resource belonging to an application.
 type Resource struct {
-	ID              uuid.UUID                        `json:"id"`
-	ApplicationID   uuid.UUID                        `json:"application_id"`
-	Kind            ResourceKind                     `json:"kind"`
-	Name            string                           `json:"name"`
-	Spec            json.RawMessage                  `json:"spec"`
-	ProviderMappings map[CloudProvider]ProviderResource `json:"provider_mappings"`
-	CreatedAt       time.Time                        `json:"created_at"`
+	ID               uuid.UUID                          `json:"id"`
+	ApplicationID    uuid.UUID                          `json:"application_id"`
+	AnalysisRunID    *uuid.UUID                         `json:"analysis_run_id,omitempty"`
+	Kind             ResourceKind                       `json:"kind"`
+	Name             string                             `json:"name"`
+	Spec             json.RawMessage                    `json:"spec"`
+	ProviderMappings map[CloudProvider]ProviderResource  `json:"provider_mappings"`
+	CreatedAt        time.Time                          `json:"created_at"`
 }
 
 // NewResource creates a new resource with the given attributes.

@@ -13,19 +13,21 @@ import (
 
 // ResourceService handles resource management with LLM-powered analysis.
 type ResourceService struct {
-	resources  repository.ResourceRepo
-	apps       repository.ApplicationRepo
-	llm        llm.Client
-	compliance *compliance.Registry
+	resources    repository.ResourceRepo
+	apps         repository.ApplicationRepo
+	analysisRuns repository.AnalysisRunRepo
+	llm          llm.Client
+	compliance   *compliance.Registry
 }
 
 // NewResourceService creates a new ResourceService.
-func NewResourceService(resources repository.ResourceRepo, apps repository.ApplicationRepo, llmClient llm.Client, complianceRegistry *compliance.Registry) *ResourceService {
+func NewResourceService(resources repository.ResourceRepo, apps repository.ApplicationRepo, analysisRuns repository.AnalysisRunRepo, llmClient llm.Client, complianceRegistry *compliance.Registry) *ResourceService {
 	return &ResourceService{
-		resources:  resources,
-		apps:       apps,
-		llm:        llmClient,
-		compliance: complianceRegistry,
+		resources:    resources,
+		apps:         apps,
+		analysisRuns: analysisRuns,
+		llm:          llmClient,
+		compliance:   complianceRegistry,
 	}
 }
 
@@ -61,9 +63,23 @@ func (s *ResourceService) Get(ctx context.Context, id uuid.UUID) (domain.Resourc
 	return s.resources.GetByID(ctx, id)
 }
 
-// ListByApplication returns all resources for an application.
+// ListByApplication returns the current resources for an application
+// (latest analysis run + manually-added resources).
 func (s *ResourceService) ListByApplication(ctx context.Context, appID uuid.UUID) ([]domain.Resource, error) {
-	return s.resources.ListByApplicationID(ctx, appID)
+	return s.resources.ListCurrentByApplicationID(ctx, appID)
+}
+
+// ListAnalysisRuns returns all analysis runs for an application, newest first.
+func (s *ResourceService) ListAnalysisRuns(ctx context.Context, appID uuid.UUID) ([]domain.AnalysisRun, error) {
+	if s.analysisRuns == nil {
+		return nil, nil
+	}
+	return s.analysisRuns.ListByApplicationID(ctx, appID)
+}
+
+// ListResourcesByRun returns all resources belonging to a specific analysis run.
+func (s *ResourceService) ListResourcesByRun(ctx context.Context, runID uuid.UUID) ([]domain.Resource, error) {
+	return s.resources.ListByAnalysisRunID(ctx, runID)
 }
 
 // Remove deletes a resource.

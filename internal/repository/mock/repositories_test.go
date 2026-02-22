@@ -162,7 +162,7 @@ func TestDeploymentRepo_CRUD(t *testing.T) {
 	ctx := context.Background()
 	appID := uuid.New()
 
-	d := domain.NewDeployment(appID, domain.ProviderAWS, "abc123", "main", nil)
+	d := domain.NewDeployment(appID, domain.ProviderAWS, "abc123", "main", nil, nil)
 
 	// Create
 	if err := repo.Create(ctx, d); err != nil {

@@ -16,6 +16,38 @@ const (
 	DeploymentFailed     DeploymentStatus = "failed"
 )
 
+// DeployTarget holds provider-specific deployment target configuration.
+// It is stored as JSONB on the deployment record.
+type DeployTarget struct {
+	// AWS fields
+	AWSRegion    string `json:"aws_region,omitempty"`
+	AWSAccountID string `json:"aws_account_id,omitempty"`
+	AWSRoleARN   string `json:"aws_role_arn,omitempty"`
+
+	// GCP fields
+	GCPProjectID string `json:"gcp_project_id,omitempty"`
+	GCPRegion    string `json:"gcp_region,omitempty"`
+	GCPFolder    string `json:"gcp_folder,omitempty"`
+}
+
+// Validate checks that provider-specific required fields are present.
+func (t DeployTarget) Validate(provider CloudProvider) error {
+	switch provider {
+	case ProviderAWS:
+		if t.AWSRegion == "" {
+			return ErrValidation("AWS region is required")
+		}
+	case ProviderGCP:
+		if t.GCPProjectID == "" {
+			return ErrValidation("GCP project ID is required")
+		}
+		if t.GCPRegion == "" {
+			return ErrValidation("GCP region is required")
+		}
+	}
+	return nil
+}
+
 // Deployment represents a deployment event for an application.
 type Deployment struct {
 	ID            uuid.UUID        `json:"id"`
@@ -26,12 +58,13 @@ type Deployment struct {
 	GitBranch     string           `json:"git_branch"`
 	Status        DeploymentStatus `json:"status"`
 	TerraformPlan string           `json:"terraform_plan,omitempty"`
+	DeployTarget  *DeployTarget    `json:"deploy_target,omitempty"`
 	StartedAt     time.Time        `json:"started_at"`
 	CompletedAt   *time.Time       `json:"completed_at,omitempty"`
 }
 
 // NewDeployment creates a new pending deployment.
-func NewDeployment(appID uuid.UUID, provider CloudProvider, gitCommit, gitBranch string, planID *uuid.UUID) Deployment {
+func NewDeployment(appID uuid.UUID, provider CloudProvider, gitCommit, gitBranch string, planID *uuid.UUID, target *DeployTarget) Deployment {
 	return Deployment{
 		ID:            uuid.New(),
 		ApplicationID: appID,
@@ -40,6 +73,7 @@ func NewDeployment(appID uuid.UUID, provider CloudProvider, gitCommit, gitBranch
 		GitCommit:     gitCommit,
 		GitBranch:     gitBranch,
 		Status:        DeploymentPending,
+		DeployTarget:  target,
 		StartedAt:     time.Now().UTC(),
 	}
 }
@@ -48,12 +82,13 @@ func NewDeployment(appID uuid.UUID, provider CloudProvider, gitCommit, gitBranch
 type DeploymentStep string
 
 const (
-	StepInitializing        DeploymentStep = "initializing"
-	StepGeneratingTerraform DeploymentStep = "generating_terraform"
-	StepValidating          DeploymentStep = "validating"
-	StepApplying            DeploymentStep = "applying"
-	StepComplete            DeploymentStep = "complete"
-	StepFailed              DeploymentStep = "failed"
+	StepInitializing            DeploymentStep = "initializing"
+	StepGeneratingTerraform     DeploymentStep = "generating_terraform"
+	StepValidatingCredentials   DeploymentStep = "validating_credentials"
+	StepValidating              DeploymentStep = "validating"
+	StepApplying                DeploymentStep = "applying"
+	StepComplete                DeploymentStep = "complete"
+	StepFailed                  DeploymentStep = "failed"
 )
 
 // DeploymentEvent is a single log entry streamed to the client during deployment execution.
@@ -75,6 +110,11 @@ func (d Deployment) Validate() error {
 	}
 	if d.GitBranch == "" {
 		return ErrValidation("git branch is required")
+	}
+	if d.DeployTarget != nil {
+		if err := d.DeployTarget.Validate(d.Provider); err != nil {
+			return err
+		}
 	}
 	return nil
 }

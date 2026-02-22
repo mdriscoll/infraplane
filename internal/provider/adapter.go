@@ -12,15 +12,16 @@ type CloudProviderAdapter interface {
 	// Provider returns the cloud provider this adapter handles.
 	Provider() domain.CloudProvider
 
-	// ValidateCredentials checks whether the provided credentials are valid.
-	ValidateCredentials(ctx context.Context) error
+	// ValidateCredentials checks whether credentials are valid for the given target.
+	ValidateCredentials(ctx context.Context, target *domain.DeployTarget) error
 
 	// ApplyTerraform takes generated Terraform HCL and applies it.
+	// eventSink receives each line of terraform output for real-time streaming.
 	// Returns the Terraform plan output or an error.
-	ApplyTerraform(ctx context.Context, hcl string) (string, error)
+	ApplyTerraform(ctx context.Context, hcl string, target *domain.DeployTarget, eventSink func(string)) (string, error)
 
 	// DestroyTerraform destroys infrastructure described by the given HCL.
-	DestroyTerraform(ctx context.Context, hcl string) error
+	DestroyTerraform(ctx context.Context, hcl string, target *domain.DeployTarget) error
 }
 
 // Registry holds adapters for each cloud provider.

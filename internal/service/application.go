@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,21 +18,23 @@ import (
 
 // ApplicationService handles application lifecycle operations.
 type ApplicationService struct {
-	apps       repository.ApplicationRepo
-	resources  repository.ResourceRepo
-	llm        llm.Client
-	compliance *compliance.Registry
+	apps         repository.ApplicationRepo
+	resources    repository.ResourceRepo
+	analysisRuns repository.AnalysisRunRepo
+	llm          llm.Client
+	compliance   *compliance.Registry
 }
 
 // NewApplicationService creates a new ApplicationService.
-// The resources and llmClient params are optional — pass nil to skip auto-detection.
+// The resources, analysisRuns, and llmClient params are optional — pass nil to skip auto-detection.
 // The compliance registry is optional — pass nil to skip compliance validation.
-func NewApplicationService(apps repository.ApplicationRepo, resources repository.ResourceRepo, llmClient llm.Client, complianceRegistry *compliance.Registry) *ApplicationService {
+func NewApplicationService(apps repository.ApplicationRepo, resources repository.ResourceRepo, analysisRuns repository.AnalysisRunRepo, llmClient llm.Client, complianceRegistry *compliance.Registry) *ApplicationService {
 	return &ApplicationService{
-		apps:       apps,
-		resources:  resources,
-		llm:        llmClient,
-		compliance: complianceRegistry,
+		apps:         apps,
+		resources:    resources,
+		analysisRuns: analysisRuns,
+		llm:          llmClient,
+		compliance:   complianceRegistry,
 	}
 }
 
@@ -67,13 +71,26 @@ func (s *ApplicationService) Register(ctx context.Context, name, description, gi
 	// Auto-detect resources from source if configured
 	if s.llm != nil && s.resources != nil {
 		if opts != nil && opts.UploadedFiles != nil && len(opts.UploadedFiles.Files) > 0 {
-			// Browser upload flow: analyze the uploaded file contents directly
+			// Browser upload flow: persist uploaded files server-side so that
+			// discovery, reanalyze, and other features can read them later.
+			persisted, err := persistUploadedFiles(app.ID, opts.UploadedFiles.Files)
+			if err != nil {
+				log.Printf("persist uploaded files for %s: %v", app.Name, err)
+			} else {
+				app.SourcePath = persisted
+				app.UpdatedAt = time.Now().UTC()
+				if err := s.apps.Update(ctx, app); err != nil {
+					log.Printf("update source_path for %s: %v", app.Name, err)
+				}
+			}
+
+			// Analyze the uploaded file contents directly
 			if err := s.AnalyzeUploadedFiles(ctx, app.ID, *opts.UploadedFiles); err != nil {
 				log.Printf("auto-detect resources (uploaded) for %s: %v", app.Name, err)
 			}
 		} else if sourcePath != "" {
 			// Server-side flow: read files from filesystem/git
-			if err := s.autoDetectResources(ctx, app); err != nil {
+			if err := s.autoDetectResources(ctx, app, domain.RunTriggerRegister); err != nil {
 				log.Printf("auto-detect resources for %s: %v", app.Name, err)
 			}
 		}
@@ -82,9 +99,37 @@ func (s *ApplicationService) Register(ctx context.Context, name, description, gi
 	return app, nil
 }
 
+// persistUploadedFiles writes browser-uploaded files to ~/.infraplane/sources/<appID>/
+// so that discovery and reanalyze can read them later. Returns the directory path.
+func persistUploadedFiles(appID uuid.UUID, files []analyzer.FileContent) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home dir: %w", err)
+	}
+
+	dir := filepath.Join(home, ".infraplane", "sources", appID.String())
+
+	// Remove any previous upload for this app
+	_ = os.RemoveAll(dir)
+
+	for _, f := range files {
+		fullPath := filepath.Join(dir, f.Path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			return "", fmt.Errorf("mkdir %s: %w", filepath.Dir(fullPath), err)
+		}
+		if err := os.WriteFile(fullPath, []byte(f.Content), 0644); err != nil {
+			return "", fmt.Errorf("write %s: %w", f.Path, err)
+		}
+	}
+
+	log.Printf("persisted %d uploaded files to %s", len(files), dir)
+	return dir, nil
+}
+
 // autoDetectResources analyzes the application's source code and creates
-// resources based on the LLM's recommendations.
-func (s *ApplicationService) autoDetectResources(ctx context.Context, app domain.Application) error {
+// resources based on the LLM's recommendations. Each invocation creates a new
+// analysis run so old resources are archived automatically.
+func (s *ApplicationService) autoDetectResources(ctx context.Context, app domain.Application, trigger domain.AnalysisRunTrigger) error {
 	codeCtx, err := analyzer.Analyze(app.SourcePath)
 	if err != nil {
 		return fmt.Errorf("analyze source: %w", err)
@@ -99,9 +144,21 @@ func (s *ApplicationService) autoDetectResources(ctx context.Context, app domain
 		return fmt.Errorf("LLM codebase analysis: %w", err)
 	}
 
+	// Create analysis run to group these resources
+	run := domain.NewAnalysisRun(app.ID, trigger)
+	if s.analysisRuns != nil {
+		if err := s.analysisRuns.Create(ctx, run); err != nil {
+			return fmt.Errorf("create analysis run: %w", err)
+		}
+	}
+
+	count := 0
 	for _, rec := range recommendations {
 		resource := domain.NewResource(app.ID, rec.Kind, rec.Name, rec.Spec)
 		resource.ProviderMappings = rec.Mappings
+		if s.analysisRuns != nil {
+			resource.AnalysisRunID = &run.ID
+		}
 
 		if err := resource.Validate(); err != nil {
 			log.Printf("skip invalid resource %s: %v", rec.Name, err)
@@ -111,6 +168,14 @@ func (s *ApplicationService) autoDetectResources(ctx context.Context, app domain
 		if err := s.resources.Create(ctx, resource); err != nil {
 			log.Printf("create resource %s: %v", rec.Name, err)
 			continue
+		}
+		count++
+	}
+
+	// Update the run with the final resource count
+	if s.analysisRuns != nil {
+		if err := s.analysisRuns.UpdateResourceCount(ctx, run.ID, count); err != nil {
+			log.Printf("update analysis run resource count: %v", err)
 		}
 	}
 
@@ -132,12 +197,13 @@ func (s *ApplicationService) ReanalyzeSource(ctx context.Context, appID uuid.UUI
 		return domain.ErrValidation("auto-detection not configured")
 	}
 
-	return s.autoDetectResources(ctx, app)
+	return s.autoDetectResources(ctx, app, domain.RunTriggerReanalyze)
 }
 
 // AnalyzeUploadedFiles analyzes file contents uploaded from the browser (since
-// browsers can't expose filesystem paths). It runs LLM analysis on the provided
-// CodeContext and creates resources for the application.
+// browsers can't expose filesystem paths). It persists the files server-side
+// so discovery can use them later, runs LLM analysis on the provided
+// CodeContext, and creates resources for the application.
 func (s *ApplicationService) AnalyzeUploadedFiles(ctx context.Context, appID uuid.UUID, codeCtx analyzer.CodeContext) error {
 	app, err := s.apps.GetByID(ctx, appID)
 	if err != nil {
@@ -152,14 +218,40 @@ func (s *ApplicationService) AnalyzeUploadedFiles(ctx context.Context, appID uui
 		return nil
 	}
 
+	// Persist uploaded files so discovery/reanalyze can read them later
+	if app.SourcePath == "" {
+		persisted, err := persistUploadedFiles(appID, codeCtx.Files)
+		if err != nil {
+			log.Printf("persist uploaded files for %s: %v", app.Name, err)
+		} else {
+			app.SourcePath = persisted
+			app.UpdatedAt = time.Now().UTC()
+			if err := s.apps.Update(ctx, app); err != nil {
+				log.Printf("update source_path for %s: %v", app.Name, err)
+			}
+		}
+	}
+
 	recommendations, err := s.llm.AnalyzeCodebase(ctx, codeCtx, app.Provider)
 	if err != nil {
 		return fmt.Errorf("LLM codebase analysis: %w", err)
 	}
 
+	// Create analysis run to group these resources
+	run := domain.NewAnalysisRun(app.ID, domain.RunTriggerUpload)
+	if s.analysisRuns != nil {
+		if err := s.analysisRuns.Create(ctx, run); err != nil {
+			return fmt.Errorf("create analysis run: %w", err)
+		}
+	}
+
+	count := 0
 	for _, rec := range recommendations {
 		resource := domain.NewResource(app.ID, rec.Kind, rec.Name, rec.Spec)
 		resource.ProviderMappings = rec.Mappings
+		if s.analysisRuns != nil {
+			resource.AnalysisRunID = &run.ID
+		}
 
 		if err := resource.Validate(); err != nil {
 			log.Printf("skip invalid resource %s: %v", rec.Name, err)
@@ -169,6 +261,14 @@ func (s *ApplicationService) AnalyzeUploadedFiles(ctx context.Context, appID uui
 		if err := s.resources.Create(ctx, resource); err != nil {
 			log.Printf("create resource %s: %v", rec.Name, err)
 			continue
+		}
+		count++
+	}
+
+	// Update the run with the final resource count
+	if s.analysisRuns != nil {
+		if err := s.analysisRuns.UpdateResourceCount(ctx, run.ID, count); err != nil {
+			log.Printf("update analysis run resource count: %v", err)
 		}
 	}
 
@@ -235,8 +335,8 @@ func (s *ApplicationService) Onboard(
 		return OnboardResult{}, fmt.Errorf("register: %w", err)
 	}
 
-	// Step 2: Load the detected resources
-	resources, err := s.resources.ListByApplicationID(ctx, app.ID)
+	// Step 2: Load the detected resources (current only)
+	resources, err := s.resources.ListCurrentByApplicationID(ctx, app.ID)
 	if err != nil {
 		return OnboardResult{}, fmt.Errorf("list resources: %w", err)
 	}

@@ -3,40 +3,20 @@ package gcp
 import (
 	"context"
 	"fmt"
-	"os"
 
+	"golang.org/x/oauth2/google"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
+	tfexec "github.com/matthewdriscoll/infraplane/internal/terraform"
 )
 
 // Adapter implements CloudProviderAdapter for GCP.
 type Adapter struct {
-	project              string
-	region               string
-	credentialsFile      string
+	executor *tfexec.Executor
 }
 
-// Config holds GCP-specific configuration.
-type Config struct {
-	Project         string
-	Region          string
-	CredentialsFile string
-}
-
-// NewAdapter creates a new GCP adapter with the given config.
-// If config is nil, it reads from environment variables.
-func NewAdapter(cfg *Config) *Adapter {
-	if cfg == nil {
-		cfg = &Config{
-			Project:         os.Getenv("GOOGLE_PROJECT"),
-			Region:          envOrDefault("GOOGLE_REGION", "us-central1"),
-			CredentialsFile: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-		}
-	}
-	return &Adapter{
-		project:         cfg.Project,
-		region:          cfg.Region,
-		credentialsFile: cfg.CredentialsFile,
-	}
+// NewAdapter creates a new GCP adapter backed by a real terraform executor.
+func NewAdapter(executor *tfexec.Executor) *Adapter {
+	return &Adapter{executor: executor}
 }
 
 // Provider returns the cloud provider this adapter handles.
@@ -44,58 +24,58 @@ func (a *Adapter) Provider() domain.CloudProvider {
 	return domain.ProviderGCP
 }
 
-// ValidateCredentials checks whether GCP credentials are configured.
-func (a *Adapter) ValidateCredentials(ctx context.Context) error {
-	if a.project == "" {
-		return fmt.Errorf("GCP project not configured: set GOOGLE_PROJECT")
+// ValidateCredentials verifies GCP credentials using Application Default Credentials.
+func (a *Adapter) ValidateCredentials(ctx context.Context, target *domain.DeployTarget) error {
+	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	if err != nil {
+		return fmt.Errorf("GCP credential validation failed: %w", err)
 	}
-	if a.credentialsFile == "" {
-		return fmt.Errorf("GCP credentials not configured: set GOOGLE_APPLICATION_CREDENTIALS")
+
+	if target != nil && target.GCPProjectID != "" {
+		// If credentials have a project, verify it matches
+		if creds.ProjectID != "" && creds.ProjectID != target.GCPProjectID {
+			// This is a warning — the terraform provider block will use the target's project.
+			// Credential discovery might return a different project, which is usually fine.
+		}
 	}
-	// In a real implementation, this would use the Google Cloud SDK
-	// to verify the service account credentials are valid.
+
+	// Verify we can get a token
+	_, err = creds.TokenSource.Token()
+	if err != nil {
+		return fmt.Errorf("GCP token validation failed: %w", err)
+	}
+
 	return nil
 }
 
-// ApplyTerraform takes Terraform HCL and applies it against GCP.
-// In this implementation, it validates the HCL and returns a simulated plan.
-// A production implementation would shell out to `terraform init && terraform apply`.
-func (a *Adapter) ApplyTerraform(ctx context.Context, hcl string) (string, error) {
+// ApplyTerraform runs real terraform init/plan/apply via the executor.
+func (a *Adapter) ApplyTerraform(ctx context.Context, hcl string, target *domain.DeployTarget, eventSink func(string)) (string, error) {
 	if hcl == "" {
 		return "", fmt.Errorf("empty Terraform configuration")
 	}
 
-	if err := a.ValidateCredentials(ctx); err != nil {
-		return "", fmt.Errorf("credential check failed: %w", err)
+	result, err := a.executor.Execute(ctx, tfexec.ExecuteOpts{
+		HCL:       hcl,
+		Target:    target,
+		Provider:  domain.ProviderGCP,
+		EventSink: eventSink,
+	})
+	if err != nil {
+		return "", fmt.Errorf("terraform execution failed: %w", err)
 	}
 
-	// Simulate: in production, this would:
-	// 1. Write HCL to a temp directory
-	// 2. Run `terraform init`
-	// 3. Run `terraform plan`
-	// 4. Run `terraform apply -auto-approve`
-	// 5. Return the plan output
-
-	return fmt.Sprintf("GCP Terraform plan applied successfully in project %s, region %s", a.project, a.region), nil
+	return result.PlanOutput, nil
 }
 
 // DestroyTerraform destroys infrastructure described by the given HCL.
-func (a *Adapter) DestroyTerraform(ctx context.Context, hcl string) error {
+func (a *Adapter) DestroyTerraform(ctx context.Context, hcl string, target *domain.DeployTarget) error {
 	if hcl == "" {
 		return fmt.Errorf("empty Terraform configuration")
 	}
 
-	if err := a.ValidateCredentials(ctx); err != nil {
-		return fmt.Errorf("credential check failed: %w", err)
-	}
-
-	// Simulate: in production, this would run `terraform destroy -auto-approve`
-	return nil
-}
-
-func envOrDefault(key, defaultVal string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return defaultVal
+	return a.executor.Destroy(ctx, tfexec.ExecuteOpts{
+		HCL:      hcl,
+		Target:   target,
+		Provider: domain.ProviderGCP,
+	})
 }

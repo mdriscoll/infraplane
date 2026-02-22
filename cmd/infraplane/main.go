@@ -6,12 +6,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/matthewdriscoll/infraplane/internal/api"
 	gcpcloud "github.com/matthewdriscoll/infraplane/internal/cloud/gcp"
 	"github.com/matthewdriscoll/infraplane/internal/compliance"
+	"github.com/matthewdriscoll/infraplane/internal/credentials"
 	"github.com/matthewdriscoll/infraplane/internal/llm"
 	mcpserver "github.com/matthewdriscoll/infraplane/internal/mcp"
 	"github.com/matthewdriscoll/infraplane/internal/provider"
@@ -20,6 +22,7 @@ import (
 	"github.com/matthewdriscoll/infraplane/internal/repository/mock"
 	"github.com/matthewdriscoll/infraplane/internal/repository/postgres"
 	"github.com/matthewdriscoll/infraplane/internal/service"
+	tfexec "github.com/matthewdriscoll/infraplane/internal/terraform"
 )
 
 func main() {
@@ -48,24 +51,28 @@ func main() {
 	// Build LLM client
 	llmClient := llm.NewAnthropicClient(anthropicKey)
 
-	// Build GCP Cloud Asset Inventory client (optional — works without it)
-	var assetClient *gcpcloud.AssetClient
-	ac, acErr := gcpcloud.NewAssetClient(context.Background())
-	if acErr != nil {
-		log.Printf("GCP Asset Inventory unavailable: %v (targeted CLI discovery still works)", acErr)
-	} else {
-		assetClient = ac
-		defer assetClient.Close()
-	}
+	// Build credential store for GCP service account key uploads
+	credStore := credentials.NewStore()
+
+	// Build GCP client manager (manages ProjectClient + AssetClient lifecycle)
+	gcpManager := gcpcloud.NewManager(context.Background())
+	defer gcpManager.Close()
 
 	// Build compliance registry
 	complianceRegistry := compliance.NewRegistry()
 	log.Printf("Compliance registry loaded: %d frameworks", len(complianceRegistry.ListFrameworks()))
 
-	// Build provider registry
+	// Build Terraform executor
+	tfBinary := os.Getenv("TERRAFORM_BINARY")
+	if tfBinary == "" {
+		tfBinary = "terraform"
+	}
+	tfExecutor := tfexec.NewExecutor(tfBinary, 10*time.Minute)
+
+	// Build provider registry with real terraform executor
 	providerRegistry := provider.NewRegistry()
-	providerRegistry.Register(awsadapter.NewAdapter(nil))
-	providerRegistry.Register(gcpadapter.NewAdapter(nil))
+	providerRegistry.Register(awsadapter.NewAdapter(tfExecutor))
+	providerRegistry.Register(gcpadapter.NewAdapter(tfExecutor))
 
 	// Build repositories and services
 	var appSvc *service.ApplicationService
@@ -89,14 +96,15 @@ func main() {
 		depRepo := postgres.NewDeploymentRepo(pool)
 		planRepo := postgres.NewPlanRepo(pool)
 		graphRepo := postgres.NewGraphRepo(pool)
+		analysisRunRepo := postgres.NewAnalysisRunRepo(pool)
 
-		appSvc = service.NewApplicationService(appRepo, resRepo, llmClient, complianceRegistry)
-		resSvc = service.NewResourceService(resRepo, appRepo, llmClient, complianceRegistry)
+		appSvc = service.NewApplicationService(appRepo, resRepo, analysisRunRepo, llmClient, complianceRegistry)
+		resSvc = service.NewResourceService(resRepo, appRepo, analysisRunRepo, llmClient, complianceRegistry)
 		planSvc = service.NewPlannerService(planRepo, appRepo, resRepo, llmClient, complianceRegistry)
 		depSvc = service.NewDeploymentService(depRepo, appRepo)
-		infraSvc = service.NewInfraService(appRepo, resRepo, depRepo, providerRegistry)
+		infraSvc = service.NewInfraService(appRepo, resRepo, depRepo, providerRegistry, llmClient, complianceRegistry)
 		graphSvc = service.NewGraphService(graphRepo, appRepo, resRepo, llmClient)
-		discSvc = service.NewDiscoveryService(appRepo, llmClient, assetClient)
+		discSvc = service.NewDiscoveryService(appRepo, llmClient, gcpManager.AssetClient())
 
 		log.Println("Using PostgreSQL storage")
 	} else {
@@ -106,21 +114,23 @@ func main() {
 		depRepo := mock.NewDeploymentRepo()
 		planRepo := mock.NewPlanRepo()
 		graphRepo := mock.NewGraphRepo()
+		analysisRunRepo := mock.NewAnalysisRunRepo()
+		resRepo.SetAnalysisRunRepo(analysisRunRepo)
 
-		appSvc = service.NewApplicationService(appRepo, resRepo, llmClient, complianceRegistry)
-		resSvc = service.NewResourceService(resRepo, appRepo, llmClient, complianceRegistry)
+		appSvc = service.NewApplicationService(appRepo, resRepo, analysisRunRepo, llmClient, complianceRegistry)
+		resSvc = service.NewResourceService(resRepo, appRepo, analysisRunRepo, llmClient, complianceRegistry)
 		planSvc = service.NewPlannerService(planRepo, appRepo, resRepo, llmClient, complianceRegistry)
 		depSvc = service.NewDeploymentService(depRepo, appRepo)
-		infraSvc = service.NewInfraService(appRepo, resRepo, depRepo, providerRegistry)
+		infraSvc = service.NewInfraService(appRepo, resRepo, depRepo, providerRegistry, llmClient, complianceRegistry)
 		graphSvc = service.NewGraphService(graphRepo, appRepo, resRepo, llmClient)
-		discSvc = service.NewDiscoveryService(appRepo, llmClient, assetClient)
+		discSvc = service.NewDiscoveryService(appRepo, llmClient, gcpManager.AssetClient())
 
 		log.Println("Using in-memory storage (set DATABASE_URL for PostgreSQL)")
 	}
 
 	if mode == "http" {
 		// HTTP REST API mode for the dashboard
-		router := api.NewRouter(appSvc, resSvc, planSvc, depSvc, infraSvc, graphSvc, discSvc, complianceRegistry)
+		router := api.NewRouter(appSvc, resSvc, planSvc, depSvc, infraSvc, graphSvc, discSvc, complianceRegistry, gcpManager, credStore)
 		log.Printf("Infraplane REST API starting on :%s...", port)
 		if err := http.ListenAndServe(":"+port, router); err != nil {
 			log.Fatalf("HTTP server error: %v", err)

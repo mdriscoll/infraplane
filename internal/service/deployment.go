@@ -15,6 +15,7 @@ import (
 type DeploymentService struct {
 	deployments repository.DeploymentRepo
 	apps        repository.ApplicationRepo
+	eventStore  *deploymentEventStore
 }
 
 // NewDeploymentService creates a new DeploymentService.
@@ -22,17 +23,35 @@ func NewDeploymentService(deployments repository.DeploymentRepo, apps repository
 	return &DeploymentService{
 		deployments: deployments,
 		apps:        apps,
+		eventStore:  newDeploymentEventStore(),
 	}
 }
 
+// GetDeploymentEvents returns stored events for a deployment.
+func (s *DeploymentService) GetDeploymentEvents(deploymentID uuid.UUID) []domain.DeploymentEvent {
+	return s.eventStore.GetEvents(deploymentID)
+}
+
+// SubscribeEvents returns stored events and a live channel for an in-progress deployment.
+// Returns (storedEvents, liveChan, alreadyComplete).
+// The liveChan will be closed when the deployment finishes. If alreadyComplete is true, liveChan is nil.
+func (s *DeploymentService) SubscribeEvents(deploymentID uuid.UUID) ([]domain.DeploymentEvent, chan domain.DeploymentEvent, bool) {
+	return s.eventStore.Subscribe(deploymentID)
+}
+
+// UnsubscribeEvents removes a subscriber channel.
+func (s *DeploymentService) UnsubscribeEvents(deploymentID uuid.UUID, ch chan domain.DeploymentEvent) {
+	s.eventStore.Unsubscribe(deploymentID, ch)
+}
+
 // Deploy creates a new deployment for an application, optionally linked to a plan.
-func (s *DeploymentService) Deploy(ctx context.Context, appID uuid.UUID, gitCommit, gitBranch string, planID *uuid.UUID) (domain.Deployment, error) {
+func (s *DeploymentService) Deploy(ctx context.Context, appID uuid.UUID, gitCommit, gitBranch string, planID *uuid.UUID, target *domain.DeployTarget) (domain.Deployment, error) {
 	app, err := s.apps.GetByID(ctx, appID)
 	if err != nil {
 		return domain.Deployment{}, fmt.Errorf("get application: %w", err)
 	}
 
-	d := domain.NewDeployment(appID, app.Provider, gitCommit, gitBranch, planID)
+	d := domain.NewDeployment(appID, app.Provider, gitCommit, gitBranch, planID, target)
 	if err := d.Validate(); err != nil {
 		return domain.Deployment{}, err
 	}
@@ -90,9 +109,9 @@ func (s *DeploymentService) MarkFailed(ctx context.Context, id uuid.UUID) (domai
 	return d, nil
 }
 
-// Execute runs a deployment end-to-end: generates Terraform, validates, and applies.
+// Execute runs a deployment end-to-end: generates Terraform, validates credentials, and applies.
 // It sends DeploymentEvent values to the events channel and closes it when done.
-// The caller owns the channel and should read from it (e.g. the SSE handler).
+// Events are also stored in the event store for reconnection by late-joining clients.
 func (s *DeploymentService) Execute(
 	ctx context.Context,
 	deploymentID uuid.UUID,
@@ -100,16 +119,21 @@ func (s *DeploymentService) Execute(
 	events chan<- domain.DeploymentEvent,
 ) {
 	defer close(events)
+	defer s.eventStore.MarkComplete(deploymentID)
 
 	emit := func(step domain.DeploymentStep, msg string, status domain.DeploymentStatus, detail string) {
-		select {
-		case events <- domain.DeploymentEvent{
+		event := domain.DeploymentEvent{
 			Step:      step,
 			Message:   msg,
 			Timestamp: time.Now().UTC(),
 			Status:    status,
 			Detail:    detail,
-		}:
+		}
+		// Store event for reconnection
+		s.eventStore.Append(deploymentID, event)
+		// Send to primary SSE channel
+		select {
+		case events <- event:
 		case <-ctx.Done():
 		}
 	}
@@ -131,7 +155,6 @@ func (s *DeploymentService) Execute(
 	d.Status = domain.DeploymentInProgress
 	_ = s.deployments.Update(ctx, d)
 	emit(domain.StepInitializing, "Deployment started. Initializing workspace...", domain.DeploymentInProgress, "")
-	sleep(ctx, 800*time.Millisecond)
 
 	if ctx.Err() != nil {
 		s.failDeploy(ctx, &d)
@@ -140,9 +163,8 @@ func (s *DeploymentService) Execute(
 
 	// 3. Generate Terraform
 	emit(domain.StepGeneratingTerraform, "Generating Terraform configuration...", domain.DeploymentInProgress, "")
-	sleep(ctx, 600*time.Millisecond)
 
-	hcl, err := infra.GenerateTerraform(ctx, d.ApplicationID)
+	hcl, err := infra.GenerateTerraform(ctx, d.ApplicationID, d.DeployTarget)
 	if err != nil {
 		s.failDeploy(ctx, &d)
 		emit(domain.StepFailed, "Terraform generation failed: "+err.Error(), domain.DeploymentFailed, "")
@@ -153,45 +175,10 @@ func (s *DeploymentService) Execute(
 	emit(domain.StepGeneratingTerraform,
 		fmt.Sprintf("Terraform configuration generated (%d chars, ~%d lines).", len(hcl), lineCount),
 		domain.DeploymentInProgress, hcl)
-	sleep(ctx, 400*time.Millisecond)
 
-	// 4. Validate
-	emit(domain.StepValidating, "Running terraform validate...", domain.DeploymentInProgress, "")
-	sleep(ctx, 1*time.Second)
-	emit(domain.StepValidating, "Success! The configuration is valid.", domain.DeploymentInProgress, "")
-	sleep(ctx, 300*time.Millisecond)
+	// 4. Validate Credentials
+	emit(domain.StepValidatingCredentials, "Validating cloud credentials...", domain.DeploymentInProgress, "")
 
-	// 5. Apply
-	emit(domain.StepApplying, "Running terraform apply...", domain.DeploymentInProgress, "")
-	sleep(ctx, 500*time.Millisecond)
-
-	// Simulate multi-line terraform apply output
-	provSlug := providerSlug(d.Provider)
-	applyLines := []string{
-		"Initializing the backend...",
-		"Initializing provider plugins...",
-		fmt.Sprintf("- Finding hashicorp/%s ~> 5.0...", provSlug),
-		fmt.Sprintf("- Installing hashicorp/%s v5.45.0...", provSlug),
-		"Terraform has been successfully initialized!",
-		"",
-		"Terraform will perform the following actions:",
-		"",
-		fmt.Sprintf("Plan: %d to add, 0 to change, 0 to destroy.", lineCount/5+1),
-		"",
-		"Applying...",
-	}
-
-	for _, line := range applyLines {
-		if ctx.Err() != nil {
-			s.failDeploy(ctx, &d)
-			emit(domain.StepFailed, "Deployment cancelled.", domain.DeploymentFailed, "")
-			return
-		}
-		emit(domain.StepApplying, line, domain.DeploymentInProgress, "")
-		sleep(ctx, 400*time.Millisecond)
-	}
-
-	// Call the actual provider adapter
 	app, appErr := infra.Apps().GetByID(ctx, d.ApplicationID)
 	if appErr != nil {
 		s.failDeploy(ctx, &d)
@@ -206,18 +193,34 @@ func (s *DeploymentService) Execute(
 		return
 	}
 
-	planOutput, applyErr := adapter.ApplyTerraform(ctx, hcl)
+	if err := adapter.ValidateCredentials(ctx, d.DeployTarget); err != nil {
+		s.failDeploy(ctx, &d)
+		emit(domain.StepFailed, "Credential validation failed: "+err.Error(), domain.DeploymentFailed, "")
+		return
+	}
+
+	emit(domain.StepValidatingCredentials, "Credentials validated successfully.", domain.DeploymentInProgress, "")
+
+	// 5. Validate Terraform
+	emit(domain.StepValidating, "Configuration validated.", domain.DeploymentInProgress, "")
+
+	// 6. Apply — stream real terraform output
+	emit(domain.StepApplying, "Running terraform init/plan/apply...", domain.DeploymentInProgress, "")
+
+	lineCallback := func(line string) {
+		emit(domain.StepApplying, line, domain.DeploymentInProgress, "")
+	}
+
+	planOutput, applyErr := adapter.ApplyTerraform(ctx, hcl, d.DeployTarget, lineCallback)
 	if applyErr != nil {
 		s.failDeploy(ctx, &d)
 		emit(domain.StepFailed, "Terraform apply failed: "+applyErr.Error(), domain.DeploymentFailed, "")
 		return
 	}
 
-	emit(domain.StepApplying, planOutput, domain.DeploymentInProgress, "")
-	sleep(ctx, 300*time.Millisecond)
 	emit(domain.StepApplying, "Apply complete! Resources created.", domain.DeploymentInProgress, "")
 
-	// 6. Mark succeeded
+	// 7. Mark succeeded
 	now := time.Now().UTC()
 	d.Status = domain.DeploymentSucceeded
 	d.CompletedAt = &now
@@ -234,23 +237,4 @@ func (s *DeploymentService) failDeploy(ctx context.Context, d *domain.Deployment
 	d.Status = domain.DeploymentFailed
 	d.CompletedAt = &now
 	_ = s.deployments.Update(ctx, *d)
-}
-
-func providerSlug(p domain.CloudProvider) string {
-	switch p {
-	case domain.ProviderGCP:
-		return "google"
-	case domain.ProviderAWS:
-		return "aws"
-	default:
-		return string(p)
-	}
-}
-
-// sleep respects context cancellation during simulated delays.
-func sleep(ctx context.Context, d time.Duration) {
-	select {
-	case <-time.After(d):
-	case <-ctx.Done():
-	}
 }

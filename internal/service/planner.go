@@ -39,7 +39,7 @@ func (s *PlannerService) GenerateHostingPlan(ctx context.Context, appID uuid.UUI
 		return domain.InfrastructurePlan{}, fmt.Errorf("get application: %w", err)
 	}
 
-	resources, err := s.resources.ListByApplicationID(ctx, appID)
+	resources, err := s.resources.ListCurrentByApplicationID(ctx, appID)
 	if err != nil {
 		return domain.InfrastructurePlan{}, fmt.Errorf("list resources: %w", err)
 	}
@@ -105,7 +105,7 @@ func (s *PlannerService) GenerateMigrationPlan(ctx context.Context, appID uuid.U
 		return domain.InfrastructurePlan{}, fmt.Errorf("get application: %w", err)
 	}
 
-	resources, err := s.resources.ListByApplicationID(ctx, appID)
+	resources, err := s.resources.ListCurrentByApplicationID(ctx, appID)
 	if err != nil {
 		return domain.InfrastructurePlan{}, fmt.Errorf("list resources: %w", err)
 	}

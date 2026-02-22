@@ -9,19 +9,23 @@ import (
 
 // stubAdapter is a minimal CloudProviderAdapter for testing.
 type stubAdapter struct {
-	provider           domain.CloudProvider
-	validateErr        error
-	applyResult        string
-	applyErr           error
-	destroyErr         error
+	provider    domain.CloudProvider
+	validateErr error
+	applyResult string
+	applyErr    error
+	destroyErr  error
 }
 
-func (s *stubAdapter) Provider() domain.CloudProvider                              { return s.provider }
-func (s *stubAdapter) ValidateCredentials(ctx context.Context) error               { return s.validateErr }
-func (s *stubAdapter) ApplyTerraform(ctx context.Context, hcl string) (string, error) {
+func (s *stubAdapter) Provider() domain.CloudProvider { return s.provider }
+func (s *stubAdapter) ValidateCredentials(ctx context.Context, target *domain.DeployTarget) error {
+	return s.validateErr
+}
+func (s *stubAdapter) ApplyTerraform(ctx context.Context, hcl string, target *domain.DeployTarget, eventSink func(string)) (string, error) {
 	return s.applyResult, s.applyErr
 }
-func (s *stubAdapter) DestroyTerraform(ctx context.Context, hcl string) error { return s.destroyErr }
+func (s *stubAdapter) DestroyTerraform(ctx context.Context, hcl string, target *domain.DeployTarget) error {
+	return s.destroyErr
+}
 
 func TestRegistry_RegisterAndGet(t *testing.T) {
 	reg := NewRegistry()

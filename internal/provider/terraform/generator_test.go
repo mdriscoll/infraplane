@@ -53,7 +53,7 @@ func TestGenerateConfig_AWS(t *testing.T) {
 		),
 	}
 
-	config, err := GenerateConfig(app, resources, domain.ProviderAWS)
+	config, err := GenerateConfig(app, resources, domain.ProviderAWS, nil)
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -90,7 +90,7 @@ func TestGenerateConfig_GCP(t *testing.T) {
 		),
 	}
 
-	config, err := GenerateConfig(app, resources, domain.ProviderGCP)
+	config, err := GenerateConfig(app, resources, domain.ProviderGCP, nil)
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -107,7 +107,7 @@ func TestGenerateConfig_GCP(t *testing.T) {
 func TestGenerateConfig_NoResources(t *testing.T) {
 	app := makeTestApp("empty-app", domain.ProviderAWS)
 
-	config, err := GenerateConfig(app, nil, domain.ProviderAWS)
+	config, err := GenerateConfig(app, nil, domain.ProviderAWS, nil)
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -130,7 +130,7 @@ func TestGenerateConfig_MultipleResources(t *testing.T) {
 		),
 	}
 
-	config, err := GenerateConfig(app, resources, domain.ProviderAWS)
+	config, err := GenerateConfig(app, resources, domain.ProviderAWS, nil)
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -146,9 +146,12 @@ func TestGenerateConfig_MultipleResources(t *testing.T) {
 func TestGenerateConfig_UnsupportedProvider(t *testing.T) {
 	app := makeTestApp("bad-app", domain.CloudProvider("azure"))
 
-	_, err := GenerateConfig(app, nil, domain.CloudProvider("azure"))
-	if err == nil {
-		t.Error("expected error for unsupported provider")
+	config, err := GenerateConfig(app, nil, domain.CloudProvider("azure"), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(config, "Unsupported provider") {
+		t.Error("expected unsupported provider comment in output")
 	}
 }
 
@@ -169,7 +172,7 @@ func TestGenerateConfig_ResourceWithoutMapping(t *testing.T) {
 		},
 	}
 
-	config, err := GenerateConfig(app, []domain.Resource{r}, domain.ProviderAWS)
+	config, err := GenerateConfig(app, []domain.Resource{r}, domain.ProviderAWS, nil)
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}

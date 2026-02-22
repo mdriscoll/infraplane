@@ -83,12 +83,18 @@ func (r *ApplicationRepo) Delete(_ context.Context, id uuid.UUID) error {
 
 // ResourceRepo is an in-memory mock implementation of repository.ResourceRepo.
 type ResourceRepo struct {
-	mu        sync.RWMutex
-	resources map[uuid.UUID]domain.Resource
+	mu           sync.RWMutex
+	resources    map[uuid.UUID]domain.Resource
+	analysisRuns *AnalysisRunRepo // optional, for ListCurrentByApplicationID
 }
 
 func NewResourceRepo() *ResourceRepo {
 	return &ResourceRepo{resources: make(map[uuid.UUID]domain.Resource)}
+}
+
+// SetAnalysisRunRepo links the analysis run repo for ListCurrentByApplicationID.
+func (r *ResourceRepo) SetAnalysisRunRepo(ar *AnalysisRunRepo) {
+	r.analysisRuns = ar
 }
 
 func (r *ResourceRepo) Create(_ context.Context, res domain.Resource) error {
@@ -120,6 +126,61 @@ func (r *ResourceRepo) ListByApplicationID(_ context.Context, appID uuid.UUID) (
 	return resources, nil
 }
 
+func (r *ResourceRepo) ListCurrentByApplicationID(_ context.Context, appID uuid.UUID) ([]domain.Resource, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Find the latest analysis run for this app
+	var latestRunID *uuid.UUID
+	if r.analysisRuns != nil {
+		r.analysisRuns.mu.RLock()
+		for _, run := range r.analysisRuns.runs {
+			if run.ApplicationID == appID {
+				if latestRunID == nil {
+					id := run.ID
+					latestRunID = &id
+				} else {
+					// Find the one with the latest CreatedAt
+					for _, existing := range r.analysisRuns.runs {
+						if existing.ID == *latestRunID {
+							if run.CreatedAt.After(existing.CreatedAt) {
+								id := run.ID
+								latestRunID = &id
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+		r.analysisRuns.mu.RUnlock()
+	}
+
+	var resources []domain.Resource
+	for _, res := range r.resources {
+		if res.ApplicationID != appID {
+			continue
+		}
+		// Include if: no run ID (manually added) OR matches latest run
+		if res.AnalysisRunID == nil || (latestRunID != nil && *res.AnalysisRunID == *latestRunID) {
+			resources = append(resources, res)
+		}
+	}
+	return resources, nil
+}
+
+func (r *ResourceRepo) ListByAnalysisRunID(_ context.Context, runID uuid.UUID) ([]domain.Resource, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var resources []domain.Resource
+	for _, res := range r.resources {
+		if res.AnalysisRunID != nil && *res.AnalysisRunID == runID {
+			resources = append(resources, res)
+		}
+	}
+	return resources, nil
+}
+
 func (r *ResourceRepo) Update(_ context.Context, res domain.Resource) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -137,6 +198,47 @@ func (r *ResourceRepo) Delete(_ context.Context, id uuid.UUID) error {
 		return domain.ErrNotFound
 	}
 	delete(r.resources, id)
+	return nil
+}
+
+// AnalysisRunRepo is an in-memory mock implementation of repository.AnalysisRunRepo.
+type AnalysisRunRepo struct {
+	mu   sync.RWMutex
+	runs map[uuid.UUID]domain.AnalysisRun
+}
+
+func NewAnalysisRunRepo() *AnalysisRunRepo {
+	return &AnalysisRunRepo{runs: make(map[uuid.UUID]domain.AnalysisRun)}
+}
+
+func (r *AnalysisRunRepo) Create(_ context.Context, run domain.AnalysisRun) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.runs[run.ID] = run
+	return nil
+}
+
+func (r *AnalysisRunRepo) ListByApplicationID(_ context.Context, appID uuid.UUID) ([]domain.AnalysisRun, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var runs []domain.AnalysisRun
+	for _, run := range r.runs {
+		if run.ApplicationID == appID {
+			runs = append(runs, run)
+		}
+	}
+	return runs, nil
+}
+
+func (r *AnalysisRunRepo) UpdateResourceCount(_ context.Context, id uuid.UUID, count int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	run, ok := r.runs[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	run.ResourceCount = count
+	r.runs[id] = run
 	return nil
 }
 

@@ -35,7 +35,7 @@ func (s *GraphService) GenerateGraph(ctx context.Context, appID uuid.UUID) (doma
 		return domain.InfraGraph{}, fmt.Errorf("get application: %w", err)
 	}
 
-	resources, err := s.resources.ListByApplicationID(ctx, appID)
+	resources, err := s.resources.ListCurrentByApplicationID(ctx, appID)
 	if err != nil {
 		return domain.InfraGraph{}, fmt.Errorf("list resources: %w", err)
 	}

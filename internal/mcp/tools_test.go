@@ -22,8 +22,11 @@ func setupTestHandlers() *ToolHandlers {
 
 	graphRepo := mock.NewGraphRepo()
 
-	appSvc := service.NewApplicationService(appRepo, resRepo, mockLLM, nil)
-	resSvc := service.NewResourceService(resRepo, appRepo, mockLLM, nil)
+	analysisRunRepo := mock.NewAnalysisRunRepo()
+	resRepo.SetAnalysisRunRepo(analysisRunRepo)
+
+	appSvc := service.NewApplicationService(appRepo, resRepo, analysisRunRepo, mockLLM, nil)
+	resSvc := service.NewResourceService(resRepo, appRepo, analysisRunRepo, mockLLM, nil)
 	planSvc := service.NewPlannerService(planRepo, appRepo, resRepo, mockLLM, nil)
 	depSvc := service.NewDeploymentService(depRepo, appRepo)
 	graphSvc := service.NewGraphService(graphRepo, appRepo, resRepo, mockLLM)

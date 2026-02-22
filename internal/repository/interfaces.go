@@ -22,8 +22,17 @@ type ResourceRepo interface {
 	Create(ctx context.Context, r domain.Resource) error
 	GetByID(ctx context.Context, id uuid.UUID) (domain.Resource, error)
 	ListByApplicationID(ctx context.Context, appID uuid.UUID) ([]domain.Resource, error)
+	ListCurrentByApplicationID(ctx context.Context, appID uuid.UUID) ([]domain.Resource, error)
+	ListByAnalysisRunID(ctx context.Context, runID uuid.UUID) ([]domain.Resource, error)
 	Update(ctx context.Context, r domain.Resource) error
 	Delete(ctx context.Context, id uuid.UUID) error
+}
+
+// AnalysisRunRepo defines data access for analysis runs.
+type AnalysisRunRepo interface {
+	Create(ctx context.Context, run domain.AnalysisRun) error
+	ListByApplicationID(ctx context.Context, appID uuid.UUID) ([]domain.AnalysisRun, error)
+	UpdateResourceCount(ctx context.Context, id uuid.UUID, count int) error
 }
 
 // DeploymentRepo defines data access for deployments.

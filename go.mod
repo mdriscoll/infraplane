@@ -5,6 +5,9 @@ go 1.25.0
 require (
 	cloud.google.com/go/asset v1.22.0
 	github.com/anthropics/anthropic-sdk-go v1.22.1
+	github.com/aws/aws-sdk-go-v2/config v1.32.9
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.9
+	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-chi/cors v1.2.2
 	github.com/golang-migrate/migrate/v4 v4.19.1
@@ -14,6 +17,7 @@ require (
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
+	golang.org/x/oauth2 v0.35.0
 	google.golang.org/api v0.266.0
 )
 
@@ -27,9 +31,21 @@ require (
 	cloud.google.com/go/longrunning v0.8.0 // indirect
 	cloud.google.com/go/orgpolicy v1.15.1 // indirect
 	cloud.google.com/go/osconfig v1.15.1 // indirect
+	cloud.google.com/go/resourcemanager v1.10.7 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.41.1 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.17 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.0.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.30.10 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.14 // indirect
+	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -97,7 +113,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.39.0 // indirect
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.34.0 // indirect

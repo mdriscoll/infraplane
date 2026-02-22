@@ -8,6 +8,8 @@ import DeployLog from '../components/DeployLog'
 import PlanViewer from '../components/PlanViewer'
 import InfraGraphView from '../components/InfraGraphView'
 import Spinner from '../components/Spinner'
+import GCPCredentialUpload from '../components/GCPCredentialUpload'
+import AnalysisRunHistory from '../components/AnalysisRunHistory'
 import {
   useApplication,
   useRemoveResource,
@@ -23,7 +25,12 @@ import {
   useGenerateGraph,
   useComplianceFrameworks,
   useDeploymentStream,
+  useDeploymentReconnect,
+  useValidateDeployTarget,
+  useGCPProjects,
+  useGCPCredentialStatus,
 } from '../hooks/useApi'
+import type { Deployment, DeployTarget } from '../api/client'
 import { pickAndReadDirectory, isDirectoryPickerSupported } from '../lib/directoryPicker'
 
 type Tab = 'plan' | 'deploy' | 'monitor' | 'optimize'
@@ -51,6 +58,9 @@ export default function ApplicationDetail() {
   const { data: graph } = useGraph(name!)
   const generateGraph = useGenerateGraph(name!)
   const { data: frameworks } = useComplianceFrameworks(data?.application?.provider)
+  const validateTarget = useValidateDeployTarget(name!)
+  const { data: gcpProjects, isLoading: gcpProjectsLoading } = useGCPProjects()
+  const { data: gcpCredStatus } = useGCPCredentialStatus()
 
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<Tab>('plan')
@@ -61,6 +71,56 @@ export default function ApplicationDetail() {
   const [streamingDeployId, setStreamingDeployId] = useState<string | null>(null)
   const { events: streamEvents, isStreaming, isComplete: streamComplete, finalStatus } = useDeploymentStream(streamingDeployId)
 
+  // Reconnect to a previously started deployment (from history click)
+  const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null)
+  const {
+    events: reconnectEvents,
+    isStreaming: reconnectStreaming,
+    isComplete: reconnectComplete,
+    finalStatus: reconnectFinalStatus,
+    reset: reconnectReset,
+  } = useDeploymentReconnect(selectedDeployment?.id ?? null)
+
+  const handleSelectDeployment = (deployment: Deployment) => {
+    if (selectedDeployment?.id === deployment.id) {
+      // Toggle off
+      setSelectedDeployment(null)
+      reconnectReset()
+      return
+    }
+    // If there's an active new deploy stream, don't overwrite it
+    setStreamingDeployId(null)
+    setSelectedDeployment(deployment)
+  }
+
+  // Deploy target state
+  const [deployProvider, setDeployProvider] = useState<'aws' | 'gcp'>('aws')
+  const [deployTarget, setDeployTarget] = useState<DeployTarget>({})
+  const [targetValid, setTargetValid] = useState<boolean | null>(null)
+  const [targetMessage, setTargetMessage] = useState('')
+
+  // Initialize deploy provider from app's provider
+  useEffect(() => {
+    if (data?.application?.provider) {
+      setDeployProvider(data.application.provider)
+    }
+  }, [data?.application?.provider])
+
+  // Auto-populate GCP project from credential status when available
+  useEffect(() => {
+    if (deployProvider === 'gcp' && gcpCredStatus?.configured && gcpCredStatus.project_id && !deployTarget.gcp_project_id) {
+      setDeployTarget((t) => ({ ...t, gcp_project_id: gcpCredStatus.project_id }))
+    }
+  }, [deployProvider, gcpCredStatus, deployTarget.gcp_project_id])
+
+  // When stream completes, refresh deployment history
+  // NOTE: This useEffect must be BEFORE early returns to satisfy Rules of Hooks
+  useEffect(() => {
+    if (streamComplete && name) {
+      queryClient.invalidateQueries({ queryKey: ['deployments', name] })
+    }
+  }, [streamComplete, name, queryClient])
+
   if (isLoading) return <div className="text-center py-12 text-gray-500">Loading...</div>
   if (error) return <div className="text-center py-12 text-red-500">Error: {error.message}</div>
   if (!data) return null
@@ -69,26 +129,42 @@ export default function ApplicationDetail() {
 
   const handleDeploy = (e: React.FormEvent) => {
     e.preventDefault()
+    const hasTarget = Object.values(deployTarget).some((v) => v)
     deployMutation.mutate(
       {
         gitBranch,
         gitCommit: gitCommit || undefined,
         planId: selectedPlanId || undefined,
+        deployTarget: hasTarget ? deployTarget : undefined,
       },
       {
         onSuccess: (deployment) => {
+          setSelectedDeployment(null)
+          reconnectReset()
           setStreamingDeployId(deployment.id)
         },
       },
     )
   }
 
-  // When stream completes, refresh deployment history
-  useEffect(() => {
-    if (streamComplete && name) {
-      queryClient.invalidateQueries({ queryKey: ['deployments', name] })
-    }
-  }, [streamComplete, name, queryClient])
+  const handleValidateTarget = () => {
+    if (!data) return
+    setTargetValid(null)
+    setTargetMessage('')
+    validateTarget.mutate(
+      { provider: deployProvider, target: deployTarget },
+      {
+        onSuccess: (result) => {
+          setTargetValid(result.valid)
+          setTargetMessage(result.message)
+        },
+        onError: (err) => {
+          setTargetValid(false)
+          setTargetMessage(err.message)
+        },
+      },
+    )
+  }
 
   const handleDeployPlan = (planId: string) => {
     setSelectedPlanId(planId)
@@ -231,6 +307,7 @@ export default function ApplicationDetail() {
               onRemove={(id) => removeResource.mutate(id)}
               removing={removeResource.isPending}
             />
+            <AnalysisRunHistory appName={name!} />
           </section>
 
           {/* Infrastructure Topology */}
@@ -466,6 +543,188 @@ export default function ApplicationDetail() {
             )}
           </section>
 
+          {/* Deployment Target */}
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Deployment Target</h2>
+            <div className="p-4 border border-gray-200 rounded-lg bg-white space-y-4">
+              {/* Top-level provider selector */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Cloud Provider</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeployProvider('aws')
+                      setDeployTarget({})
+                      setTargetValid(null)
+                      setTargetMessage('')
+                    }}
+                    className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                      deployProvider === 'aws'
+                        ? 'border-orange-300 bg-orange-50 text-orange-800 ring-2 ring-orange-200'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    AWS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeployProvider('gcp')
+                      setDeployTarget({})
+                      setTargetValid(null)
+                      setTargetMessage('')
+                    }}
+                    className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                      deployProvider === 'gcp'
+                        ? 'border-blue-300 bg-blue-50 text-blue-800 ring-2 ring-blue-200'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    GCP
+                  </button>
+                </div>
+              </div>
+
+              {/* AWS target fields */}
+              {deployProvider === 'aws' && (
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">AWS Region</label>
+                    <select
+                      value={deployTarget.aws_region || ''}
+                      onChange={(e) => {
+                        setDeployTarget((t) => ({ ...t, aws_region: e.target.value }))
+                        setTargetValid(null)
+                      }}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      <option value="">Select region</option>
+                      {['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'eu-west-1', 'eu-west-2', 'eu-central-1', 'ap-southeast-1', 'ap-northeast-1'].map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Account ID</label>
+                    <input
+                      type="text"
+                      value={deployTarget.aws_account_id || ''}
+                      onChange={(e) => {
+                        setDeployTarget((t) => ({ ...t, aws_account_id: e.target.value }))
+                        setTargetValid(null)
+                      }}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="123456789012"
+                      maxLength={12}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Role ARN (optional)</label>
+                    <input
+                      type="text"
+                      value={deployTarget.aws_role_arn || ''}
+                      onChange={(e) => {
+                        setDeployTarget((t) => ({ ...t, aws_role_arn: e.target.value }))
+                        setTargetValid(null)
+                      }}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="arn:aws:iam::123456789012:role/deploy"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* GCP credentials */}
+              {deployProvider === 'gcp' && (
+                <GCPCredentialUpload
+                  onProjectDetected={(projectId) => {
+                    setDeployTarget((t) => ({ ...t, gcp_project_id: projectId }))
+                    setTargetValid(null)
+                  }}
+                />
+              )}
+
+              {/* GCP target fields */}
+              {deployProvider === 'gcp' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Project</label>
+                    {gcpProjectsLoading ? (
+                      <div className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-400 bg-gray-50">
+                        Loading projects...
+                      </div>
+                    ) : gcpProjects && gcpProjects.length > 0 ? (
+                      <select
+                        value={deployTarget.gcp_project_id || ''}
+                        onChange={(e) => {
+                          setDeployTarget((t) => ({ ...t, gcp_project_id: e.target.value }))
+                          setTargetValid(null)
+                        }}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      >
+                        <option value="">Select project</option>
+                        {gcpProjects.map((p) => (
+                          <option key={p.project_id} value={p.project_id}>
+                            {p.display_name || p.project_id} ({p.project_id})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={deployTarget.gcp_project_id || ''}
+                        onChange={(e) => {
+                          setDeployTarget((t) => ({ ...t, gcp_project_id: e.target.value }))
+                          setTargetValid(null)
+                        }}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        placeholder="my-project-123"
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Region</label>
+                    <select
+                      value={deployTarget.gcp_region || ''}
+                      onChange={(e) => {
+                        setDeployTarget((t) => ({ ...t, gcp_region: e.target.value }))
+                        setTargetValid(null)
+                      }}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      <option value="">Select region</option>
+                      {['us-central1', 'us-east1', 'us-east4', 'us-west1', 'us-west2', 'europe-west1', 'europe-west2', 'europe-west3', 'asia-east1', 'asia-southeast1', 'australia-southeast1'].map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleValidateTarget}
+                  disabled={validateTarget.isPending}
+                  className="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                >
+                  {validateTarget.isPending ? 'Validating...' : 'Validate Credentials'}
+                </button>
+                {targetValid === true && (
+                  <span className="text-sm text-green-600 flex items-center gap-1">
+                    <span>{'\u2713'}</span> {targetMessage}
+                  </span>
+                )}
+                {targetValid === false && (
+                  <span className="text-sm text-red-600 flex items-center gap-1">
+                    <span>{'\u2717'}</span> {targetMessage}
+                  </span>
+                )}
+              </div>
+            </div>
+          </section>
+
           {/* Deploy Form */}
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Deploy</h2>
@@ -498,7 +757,7 @@ export default function ApplicationDetail() {
             )}
           </section>
 
-          {/* Streaming Deploy Log */}
+          {/* Streaming Deploy Log (new deploy) */}
           {streamingDeployId && (
             <section>
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Deployment Output</h2>
@@ -513,9 +772,42 @@ export default function ApplicationDetail() {
 
           {/* Deployment History */}
           <section>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Deployment History</h2>
-            <DeploymentHistory deployments={deployments || []} plans={plans || []} />
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Deployment History</h2>
+              {selectedDeployment && (
+                <button
+                  onClick={() => { setSelectedDeployment(null); reconnectReset() }}
+                  className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  Close log
+                </button>
+              )}
+            </div>
+            <DeploymentHistory
+              deployments={deployments || []}
+              plans={plans || []}
+              selectedDeploymentId={selectedDeployment?.id}
+              onSelectDeployment={handleSelectDeployment}
+            />
           </section>
+
+          {/* Reconnected Deploy Log (from history click) */}
+          {selectedDeployment && !streamingDeployId && (
+            <section>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                Deployment Log — {selectedDeployment.git_branch}
+                <span className="ml-2 text-sm font-normal text-gray-500">
+                  {new Date(selectedDeployment.started_at).toLocaleString()}
+                </span>
+              </h2>
+              <DeployLog
+                events={reconnectEvents}
+                isStreaming={reconnectStreaming}
+                isComplete={reconnectComplete}
+                finalStatus={reconnectFinalStatus}
+              />
+            </section>
+          )}
         </div>
       )}
 

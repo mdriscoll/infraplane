@@ -26,6 +26,7 @@ export interface ComplianceFrameworkInfo {
 export interface Resource {
   id: string
   application_id: string
+  analysis_run_id?: string
   kind: string
   name: string
   spec: Record<string, unknown>
@@ -33,10 +34,27 @@ export interface Resource {
   created_at: string
 }
 
+export interface AnalysisRun {
+  id: string
+  application_id: string
+  trigger: 'register' | 'reanalyze' | 'upload'
+  resource_count: number
+  created_at: string
+}
+
 export interface ProviderResource {
   service_name: string
   config: Record<string, unknown>
   terraform_hcl: string
+}
+
+export interface DeployTarget {
+  aws_region?: string
+  aws_account_id?: string
+  aws_role_arn?: string
+  gcp_project_id?: string
+  gcp_region?: string
+  gcp_folder?: string
 }
 
 export interface Deployment {
@@ -48,6 +66,7 @@ export interface Deployment {
   git_branch: string
   status: 'pending' | 'in_progress' | 'succeeded' | 'failed'
   terraform_plan?: string
+  deploy_target?: DeployTarget
   started_at: string
   completed_at?: string
 }
@@ -117,6 +136,13 @@ export interface OnboardResult {
   application: Application
   resources: Resource[]
   plan: InfrastructurePlan
+}
+
+export interface GCPProject {
+  project_id: string
+  name: string
+  display_name: string
+  state: string
 }
 
 // --- API Client ---
@@ -190,6 +216,13 @@ export const addResource = (appName: string, description: string) =>
 export const removeResource = (resourceId: string) =>
   request<void>(`/resources/${resourceId}`, { method: 'DELETE' })
 
+// Analysis Runs
+export const listAnalysisRuns = (appName: string) =>
+  request<AnalysisRun[]>(`/applications/${appName}/analysis-runs`)
+
+export const listResourcesByRun = (runId: string) =>
+  request<Resource[]>(`/analysis-runs/${runId}/resources`)
+
 // Plans
 export const generateHostingPlan = (appName: string) =>
   request<InfrastructurePlan>(`/applications/${appName}/hosting-plan`, { method: 'POST' })
@@ -211,14 +244,21 @@ export const generateTerraformHCL = (resourceId: string, provider: string) =>
   })
 
 // Deployments
-export const deploy = (appName: string, gitBranch: string, gitCommit?: string, planId?: string) =>
+export const deploy = (appName: string, gitBranch: string, gitCommit?: string, planId?: string, deployTarget?: DeployTarget) =>
   request<Deployment>(`/applications/${appName}/deploy`, {
     method: 'POST',
     body: JSON.stringify({
       git_branch: gitBranch,
       git_commit: gitCommit || '',
       ...(planId ? { plan_id: planId } : {}),
+      ...(deployTarget ? { deploy_target: deployTarget } : {}),
     }),
+  })
+
+export const validateDeployTarget = (appName: string, provider: string, target: DeployTarget) =>
+  request<{ valid: boolean; message: string }>(`/applications/${appName}/validate-target`, {
+    method: 'POST',
+    body: JSON.stringify({ provider, deploy_target: target }),
   })
 
 export const listDeployments = (appName: string) =>
@@ -245,9 +285,41 @@ export const getLiveResources = (appName: string) =>
 export const listComplianceFrameworks = (provider?: string) =>
   request<ComplianceFrameworkInfo[]>(`/compliance/frameworks${provider ? `?provider=${provider}` : ''}`)
 
+// GCP Projects
+export const listGCPProjects = () =>
+  request<GCPProject[]>('/gcp/projects')
+
+// GCP Credentials
+export interface GCPCredentialStatus {
+  configured: boolean
+  project_id?: string
+  client_email?: string
+  uploaded_at?: string
+}
+
+export const getGCPCredentialStatus = () =>
+  request<GCPCredentialStatus>('/gcp/credentials')
+
+export const uploadGCPCredentials = async (file: File): Promise<GCPCredentialStatus> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch(`${API_BASE}/gcp/credentials`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(body.error || `Upload failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export const deleteGCPCredentials = () =>
+  request<void>('/gcp/credentials', { method: 'DELETE' })
+
 // Deployment Streaming
 export interface DeploymentEvent {
-  step: 'initializing' | 'generating_terraform' | 'validating' | 'applying' | 'complete' | 'failed'
+  step: 'initializing' | 'generating_terraform' | 'validating_credentials' | 'validating' | 'applying' | 'complete' | 'failed'
   message: string
   timestamp: string
   status: Deployment['status']
@@ -256,3 +328,9 @@ export interface DeploymentEvent {
 
 export const getDeploymentStreamUrl = (deploymentId: string) =>
   `${API_BASE}/deployments/${deploymentId}/stream`
+
+export const getDeploymentEventsStreamUrl = (deploymentId: string) =>
+  `${API_BASE}/deployments/${deploymentId}/events/stream`
+
+export const getDeploymentEvents = (deploymentId: string) =>
+  request<DeploymentEvent[]>(`/deployments/${deploymentId}/events`)

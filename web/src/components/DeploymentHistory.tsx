@@ -10,9 +10,11 @@ const statusStyles: Record<string, string> = {
 interface DeploymentHistoryProps {
   deployments: Deployment[]
   plans?: InfrastructurePlan[]
+  selectedDeploymentId?: string | null
+  onSelectDeployment?: (deployment: Deployment) => void
 }
 
-export default function DeploymentHistory({ deployments, plans }: DeploymentHistoryProps) {
+export default function DeploymentHistory({ deployments, plans, selectedDeploymentId, onSelectDeployment }: DeploymentHistoryProps) {
   if (deployments.length === 0) {
     return <p className="text-sm text-gray-400 italic">No deployments yet.</p>
   }
@@ -23,6 +25,9 @@ export default function DeploymentHistory({ deployments, plans }: DeploymentHist
     if (!plan) return planId.slice(0, 8)
     return plan.plan_type
   }
+
+  const isClickable = (d: Deployment) =>
+    onSelectDeployment && (d.status === 'in_progress' || d.status === 'succeeded' || d.status === 'failed')
 
   return (
     <div className="overflow-hidden border border-gray-200 rounded-lg">
@@ -39,10 +44,17 @@ export default function DeploymentHistory({ deployments, plans }: DeploymentHist
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
           {deployments.map((d) => (
-            <tr key={d.id}>
+            <tr
+              key={d.id}
+              onClick={isClickable(d) ? () => onSelectDeployment!(d) : undefined}
+              className={[
+                isClickable(d) ? 'cursor-pointer hover:bg-gray-50 transition-colors' : '',
+                selectedDeploymentId === d.id ? 'bg-indigo-50 ring-1 ring-inset ring-indigo-200' : '',
+              ].join(' ')}
+            >
               <td className="px-4 py-3">
                 <span className={`text-xs font-medium px-2 py-1 rounded-full ${statusStyles[d.status] || ''}`}>
-                  {d.status}
+                  {d.status === 'in_progress' ? 'in progress' : d.status}
                 </span>
               </td>
               <td className="px-4 py-3 text-sm text-gray-900 font-mono">{d.git_branch}</td>

@@ -432,17 +432,19 @@ describe('DeployLog', () => {
     const events: DeploymentEvent[] = [
       { step: 'initializing', message: 'Init', timestamp: '2024-01-01T00:00:01Z', status: 'in_progress' },
       { step: 'generating_terraform', message: 'Gen', timestamp: '2024-01-01T00:00:02Z', status: 'in_progress' },
-      { step: 'validating', message: 'Val', timestamp: '2024-01-01T00:00:03Z', status: 'in_progress' },
-      { step: 'applying', message: 'Apply', timestamp: '2024-01-01T00:00:04Z', status: 'in_progress' },
-      { step: 'complete', message: 'Done', timestamp: '2024-01-01T00:00:05Z', status: 'succeeded' },
+      { step: 'validating_credentials', message: 'Creds', timestamp: '2024-01-01T00:00:03Z', status: 'in_progress' },
+      { step: 'validating', message: 'Val', timestamp: '2024-01-01T00:00:04Z', status: 'in_progress' },
+      { step: 'applying', message: 'Apply', timestamp: '2024-01-01T00:00:05Z', status: 'in_progress' },
+      { step: 'complete', message: 'Done', timestamp: '2024-01-01T00:00:06Z', status: 'succeeded' },
     ]
     render(<DeployLog events={events} isStreaming={false} isComplete={true} finalStatus="succeeded" />)
-    // All 4 steps should show checkmarks (✓) when complete
+    // All 5 steps should show checkmarks (✓) when complete
     const checkmarks = screen.getAllByText('\u2713')
-    expect(checkmarks).toHaveLength(4)
+    expect(checkmarks).toHaveLength(5)
     // Step labels should be present
     expect(screen.getByText('Initializing')).toBeInTheDocument()
     expect(screen.getByText('Generating Terraform')).toBeInTheDocument()
+    expect(screen.getByText('Validating Credentials')).toBeInTheDocument()
     expect(screen.getByText('Validating')).toBeInTheDocument()
     expect(screen.getByText('Applying')).toBeInTheDocument()
   })

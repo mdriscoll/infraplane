@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
+	"github.com/matthewdriscoll/infraplane/internal/llm"
 	"github.com/matthewdriscoll/infraplane/internal/provider"
 	"github.com/matthewdriscoll/infraplane/internal/repository/mock"
 )
@@ -17,6 +18,7 @@ func setupInfraService(providerName domain.CloudProvider, applyErr error) (*Infr
 	appRepo := mock.NewApplicationRepo()
 	resRepo := mock.NewResourceRepo()
 	depRepo := mock.NewDeploymentRepo()
+	mockLLM := &llm.MockClient{}
 
 	reg := provider.NewRegistry()
 	reg.Register(&provider.MockAdapter{
@@ -25,7 +27,7 @@ func setupInfraService(providerName domain.CloudProvider, applyErr error) (*Infr
 		ApplyErr:    applyErr,
 	})
 
-	svc := NewInfraService(appRepo, resRepo, depRepo, reg)
+	svc := NewInfraService(appRepo, resRepo, depRepo, reg, mockLLM, nil)
 	return svc, appRepo, resRepo
 }
 
@@ -47,7 +49,7 @@ func TestInfraService_GenerateTerraform(t *testing.T) {
 	resRepo.Create(ctx, resource)
 
 	t.Run("successful generation", func(t *testing.T) {
-		config, err := svc.GenerateTerraform(ctx, app.ID)
+		config, err := svc.GenerateTerraform(ctx, app.ID, nil)
 		if err != nil {
 			t.Fatalf("error = %v", err)
 		}
@@ -60,7 +62,7 @@ func TestInfraService_GenerateTerraform(t *testing.T) {
 	})
 
 	t.Run("app not found", func(t *testing.T) {
-		_, err := svc.GenerateTerraform(ctx, uuid.New())
+		_, err := svc.GenerateTerraform(ctx, uuid.New(), nil)
 		if err == nil {
 			t.Error("expected error for nonexistent app")
 		}
@@ -85,7 +87,7 @@ func TestInfraService_DeployInfrastructure(t *testing.T) {
 		}
 		resRepo.Create(ctx, resource)
 
-		d, err := svc.DeployInfrastructure(ctx, app.ID, "abc123", "main")
+		d, err := svc.DeployInfrastructure(ctx, app.ID, "abc123", "main", nil)
 		if err != nil {
 			t.Fatalf("error = %v", err)
 		}
@@ -109,7 +111,7 @@ func TestInfraService_DeployInfrastructure(t *testing.T) {
 		app := domain.NewApplication("fail-app", "", "", "", domain.ProviderAWS)
 		appRepo.Create(ctx, app)
 
-		d, err := svc.DeployInfrastructure(ctx, app.ID, "abc123", "main")
+		d, err := svc.DeployInfrastructure(ctx, app.ID, "abc123", "main", nil)
 		if err == nil {
 			t.Fatal("expected error from failed apply")
 		}
@@ -130,12 +132,12 @@ func TestInfraService_DeployInfrastructure(t *testing.T) {
 			ApplyResult: "ok",
 		})
 
-		svc := NewInfraService(appRepo, resRepo, depRepo, reg)
+		svc := NewInfraService(appRepo, resRepo, depRepo, reg, &llm.MockClient{}, nil)
 
 		app := domain.NewApplication("no-adapter-app", "", "", "", domain.ProviderAWS)
 		appRepo.Create(ctx, app)
 
-		d, err := svc.DeployInfrastructure(ctx, app.ID, "abc", "main")
+		d, err := svc.DeployInfrastructure(ctx, app.ID, "abc", "main", nil)
 		if err == nil {
 			t.Fatal("expected error for missing adapter")
 		}
@@ -146,7 +148,7 @@ func TestInfraService_DeployInfrastructure(t *testing.T) {
 
 	t.Run("app not found", func(t *testing.T) {
 		svc, _, _ := setupInfraService(domain.ProviderAWS, nil)
-		_, err := svc.DeployInfrastructure(ctx, uuid.New(), "abc", "main")
+		_, err := svc.DeployInfrastructure(ctx, uuid.New(), "abc", "main", nil)
 		if err == nil {
 			t.Error("expected error for nonexistent app")
 		}
@@ -157,7 +159,7 @@ func TestInfraService_DeployInfrastructure(t *testing.T) {
 		app := domain.NewApplication("no-branch", "", "", "", domain.ProviderAWS)
 		appRepo.Create(ctx, app)
 
-		_, err := svc.DeployInfrastructure(ctx, app.ID, "abc", "")
+		_, err := svc.DeployInfrastructure(ctx, app.ID, "abc", "", nil)
 		if err == nil {
 			t.Error("expected validation error for missing branch")
 		}
@@ -169,7 +171,7 @@ func TestInfraService_ValidateProvider(t *testing.T) {
 
 	t.Run("valid provider", func(t *testing.T) {
 		svc, _, _ := setupInfraService(domain.ProviderAWS, nil)
-		err := svc.ValidateProvider(ctx, domain.ProviderAWS)
+		err := svc.ValidateProvider(ctx, domain.ProviderAWS, nil)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -177,7 +179,7 @@ func TestInfraService_ValidateProvider(t *testing.T) {
 
 	t.Run("unknown provider", func(t *testing.T) {
 		svc, _, _ := setupInfraService(domain.ProviderAWS, nil)
-		err := svc.ValidateProvider(ctx, domain.CloudProvider("azure"))
+		err := svc.ValidateProvider(ctx, domain.CloudProvider("azure"), nil)
 		if err == nil {
 			t.Error("expected error for unknown provider")
 		}
@@ -203,7 +205,7 @@ func TestInfraService_DestroyInfrastructure(t *testing.T) {
 		resRepo.Create(ctx, resource)
 
 		// Deploy first
-		d, err := svc.DeployInfrastructure(ctx, app.ID, "abc", "main")
+		d, err := svc.DeployInfrastructure(ctx, app.ID, "abc", "main", nil)
 		if err != nil {
 			t.Fatalf("deploy error = %v", err)
 		}

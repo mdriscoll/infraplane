@@ -7,9 +7,27 @@ import (
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 )
 
-// providerBlocks maps cloud providers to their Terraform provider configuration.
-var providerBlocks = map[domain.CloudProvider]string{
-	domain.ProviderAWS: `terraform {
+// GenerateProviderBlock builds the terraform + provider blocks dynamically
+// based on the cloud provider and an optional deploy target.
+func GenerateProviderBlock(provider domain.CloudProvider, target *domain.DeployTarget) string {
+	switch provider {
+	case domain.ProviderAWS:
+		return generateAWSProviderBlock(target)
+	case domain.ProviderGCP:
+		return generateGCPProviderBlock(target)
+	default:
+		return fmt.Sprintf("# Unsupported provider: %s\n", provider)
+	}
+}
+
+func generateAWSProviderBlock(target *domain.DeployTarget) string {
+	region := "us-east-1"
+	if target != nil && target.AWSRegion != "" {
+		region = target.AWSRegion
+	}
+
+	var sb strings.Builder
+	sb.WriteString(`terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -19,9 +37,32 @@ var providerBlocks = map[domain.CloudProvider]string{
 }
 
 provider "aws" {
-  region = "us-east-1"
-}`,
-	domain.ProviderGCP: `terraform {
+`)
+	sb.WriteString(fmt.Sprintf("  region = %q\n", region))
+
+	if target != nil && target.AWSRoleARN != "" {
+		sb.WriteString("\n  assume_role {\n")
+		sb.WriteString(fmt.Sprintf("    role_arn = %q\n", target.AWSRoleARN))
+		sb.WriteString("  }\n")
+	}
+
+	sb.WriteString("}")
+	return sb.String()
+}
+
+func generateGCPProviderBlock(target *domain.DeployTarget) string {
+	project := "my-project"
+	region := "us-central1"
+	if target != nil {
+		if target.GCPProjectID != "" {
+			project = target.GCPProjectID
+		}
+		if target.GCPRegion != "" {
+			region = target.GCPRegion
+		}
+	}
+
+	return fmt.Sprintf(`terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
@@ -31,18 +72,15 @@ provider "aws" {
 }
 
 provider "google" {
-  project = "my-project"
-  region  = "us-central1"
-}`,
+  project = %q
+  region  = %q
+}`, project, region)
 }
 
 // GenerateConfig assembles a complete Terraform configuration for an application
 // on a given provider by combining the provider block with per-resource HCL.
-func GenerateConfig(app domain.Application, resources []domain.Resource, provider domain.CloudProvider) (string, error) {
-	block, ok := providerBlocks[provider]
-	if !ok {
-		return "", fmt.Errorf("unsupported provider: %s", provider)
-	}
+func GenerateConfig(app domain.Application, resources []domain.Resource, provider domain.CloudProvider, target *domain.DeployTarget) (string, error) {
+	block := GenerateProviderBlock(provider, target)
 
 	var sb strings.Builder
 

@@ -12,11 +12,12 @@ interface DeployLogProps {
 const stepLabels: Record<string, string> = {
   initializing: 'Initializing',
   generating_terraform: 'Generating Terraform',
+  validating_credentials: 'Validating Credentials',
   validating: 'Validating',
   applying: 'Applying',
 }
 
-const steps = ['initializing', 'generating_terraform', 'validating', 'applying'] as const
+const steps = ['initializing', 'generating_terraform', 'validating_credentials', 'validating', 'applying'] as const
 
 export default function DeployLog({ events, isStreaming, isComplete, finalStatus }: DeployLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null)

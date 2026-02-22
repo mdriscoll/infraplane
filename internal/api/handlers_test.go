@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	gcpcloud "github.com/matthewdriscoll/infraplane/internal/cloud/gcp"
+	"github.com/matthewdriscoll/infraplane/internal/credentials"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 	"github.com/matthewdriscoll/infraplane/internal/llm"
 	"github.com/matthewdriscoll/infraplane/internal/provider"
-	awsadapter "github.com/matthewdriscoll/infraplane/internal/provider/aws"
-	gcpadapter "github.com/matthewdriscoll/infraplane/internal/provider/gcp"
 	"github.com/matthewdriscoll/infraplane/internal/repository/mock"
 	"github.com/matthewdriscoll/infraplane/internal/service"
 )
@@ -26,24 +26,33 @@ func setupTestRouter() http.Handler {
 
 	graphRepo := mock.NewGraphRepo()
 
-	// Build provider registry for InfraService
+	// Build provider registry for InfraService (using mock adapters for tests)
 	providerRegistry := provider.NewRegistry()
-	providerRegistry.Register(awsadapter.NewAdapter(&awsadapter.Config{
-		Region: "us-east-1", AccessKeyID: "test", SecretAccessKey: "test",
-	}))
-	providerRegistry.Register(gcpadapter.NewAdapter(&gcpadapter.Config{
-		Project: "test-project", Region: "us-central1", CredentialsFile: "/dev/null",
-	}))
+	providerRegistry.Register(&provider.MockAdapter{
+		ProviderVal: domain.ProviderAWS,
+		ApplyResult: "Plan applied successfully",
+	})
+	providerRegistry.Register(&provider.MockAdapter{
+		ProviderVal: domain.ProviderGCP,
+		ApplyResult: "Plan applied successfully",
+	})
 
-	appSvc := service.NewApplicationService(appRepo, resRepo, mockLLM, nil)
-	resSvc := service.NewResourceService(resRepo, appRepo, mockLLM, nil)
+	analysisRunRepo := mock.NewAnalysisRunRepo()
+	resRepo.SetAnalysisRunRepo(analysisRunRepo)
+
+	appSvc := service.NewApplicationService(appRepo, resRepo, analysisRunRepo, mockLLM, nil)
+	resSvc := service.NewResourceService(resRepo, appRepo, analysisRunRepo, mockLLM, nil)
 	planSvc := service.NewPlannerService(planRepo, appRepo, resRepo, mockLLM, nil)
 	depSvc := service.NewDeploymentService(depRepo, appRepo)
-	infraSvc := service.NewInfraService(appRepo, resRepo, depRepo, providerRegistry)
+	infraSvc := service.NewInfraService(appRepo, resRepo, depRepo, providerRegistry, mockLLM, nil)
 	graphSvc := service.NewGraphService(graphRepo, appRepo, resRepo, mockLLM)
 	discSvc := service.NewDiscoveryService(appRepo, mockLLM, nil)
 
-	return NewRouter(appSvc, resSvc, planSvc, depSvc, infraSvc, graphSvc, discSvc, nil)
+	// GCP manager and credential store for tests (no real GCP clients)
+	gcpMgr := &gcpcloud.Manager{}
+	credStore := credentials.NewStore()
+
+	return NewRouter(appSvc, resSvc, planSvc, depSvc, infraSvc, graphSvc, discSvc, nil, gcpMgr, credStore)
 }
 
 func doRequest(router http.Handler, method, path string, body any) *httptest.ResponseRecorder {
