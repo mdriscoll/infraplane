@@ -1,26 +1,29 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import AppCard from '../src/components/AppCard'
 import ResourceList from '../src/components/ResourceList'
 import DeploymentHistory from '../src/components/DeploymentHistory'
 import PlanViewer from '../src/components/PlanViewer'
 import OnboardWizard from '../src/pages/OnboardWizard'
+import ApplicationList from '../src/pages/ApplicationList'
 import type { Application, Resource, Deployment, InfrastructurePlan } from '../src/api/client'
 
+const sampleApp: Application = {
+  id: '123',
+  name: 'my-api',
+  description: 'A test API',
+  git_repo_url: '',
+  source_path: '/Users/dev/my-api',
+  provider: 'aws',
+  status: 'deployed',
+  created_at: '2024-01-01T00:00:00Z',
+  updated_at: '2024-01-01T00:00:00Z',
+}
+
 describe('AppCard', () => {
-  const app: Application = {
-    id: '123',
-    name: 'my-api',
-    description: 'A test API',
-    git_repo_url: '',
-    source_path: '/Users/dev/my-api',
-    provider: 'aws',
-    status: 'deployed',
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-01-01T00:00:00Z',
-  }
+  const app = sampleApp
 
   it('renders app name and description', () => {
     render(
@@ -67,6 +70,139 @@ describe('AppCard', () => {
       </MemoryRouter>
     )
     expect(screen.queryByText('/Users/dev/my-api')).not.toBeInTheDocument()
+  })
+})
+
+// Mock the API module so ApplicationList renders with test data
+vi.mock('../src/hooks/useApi', async () => {
+  const actual = await vi.importActual('../src/hooks/useApi')
+  return {
+    ...actual,
+    useApplications: vi.fn(),
+    useRegisterApplication: vi.fn(() => ({ mutate: vi.fn(), isPending: false, isError: false })),
+    useDeleteApplication: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false, isError: false })),
+  }
+})
+
+import { useApplications, useDeleteApplication } from '../src/hooks/useApi'
+
+const mockApps: Application[] = [
+  sampleApp,
+  {
+    id: '456',
+    name: 'frontend-app',
+    description: 'React frontend',
+    git_repo_url: '',
+    source_path: '',
+    provider: 'gcp',
+    status: 'provisioned',
+    created_at: '2024-02-15T00:00:00Z',
+    updated_at: '2024-02-15T00:00:00Z',
+  },
+  {
+    id: '789',
+    name: 'worker-service',
+    description: '',
+    git_repo_url: '',
+    source_path: '',
+    provider: 'aws',
+    status: 'draft',
+    created_at: '2024-03-01T00:00:00Z',
+    updated_at: '2024-03-01T00:00:00Z',
+  },
+]
+
+describe('ApplicationList', () => {
+  beforeEach(() => {
+    vi.mocked(useApplications).mockReturnValue({
+      data: mockApps,
+      isLoading: false,
+      error: null,
+    } as any)
+    vi.mocked(useDeleteApplication).mockReturnValue({
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
+      isPending: false,
+      isError: false,
+    } as any)
+  })
+
+  it('renders a table with all applications', () => {
+    renderWithProviders(<ApplicationList />)
+    expect(screen.getByText('my-api')).toBeInTheDocument()
+    expect(screen.getByText('frontend-app')).toBeInTheDocument()
+    expect(screen.getByText('worker-service')).toBeInTheDocument()
+  })
+
+  it('shows table column headers', () => {
+    renderWithProviders(<ApplicationList />)
+    expect(screen.getByText('Name')).toBeInTheDocument()
+    expect(screen.getByText('Status')).toBeInTheDocument()
+    expect(screen.getByText('Provider')).toBeInTheDocument()
+  })
+
+  it('shows status badges and provider labels', () => {
+    renderWithProviders(<ApplicationList />)
+    expect(screen.getByText('deployed')).toBeInTheDocument()
+    expect(screen.getByText('provisioned')).toBeInTheDocument()
+    expect(screen.getByText('draft')).toBeInTheDocument()
+    expect(screen.getAllByText('AWS')).toHaveLength(2)
+    expect(screen.getByText('GCP')).toBeInTheDocument()
+  })
+
+  it('renders checkboxes for each application and a select-all', () => {
+    renderWithProviders(<ApplicationList />)
+    const checkboxes = screen.getAllByRole('checkbox')
+    // 1 select-all + 3 row checkboxes
+    expect(checkboxes).toHaveLength(4)
+  })
+
+  it('clicking a row checkbox selects it and shows bulk actions', () => {
+    renderWithProviders(<ApplicationList />)
+    const checkbox = screen.getByLabelText('Select my-api')
+    fireEvent.click(checkbox)
+    expect(screen.getByText('1 application selected')).toBeInTheDocument()
+    expect(screen.getByText('Delete selected')).toBeInTheDocument()
+  })
+
+  it('selecting multiple apps shows correct count', () => {
+    renderWithProviders(<ApplicationList />)
+    fireEvent.click(screen.getByLabelText('Select my-api'))
+    fireEvent.click(screen.getByLabelText('Select frontend-app'))
+    expect(screen.getByText('2 applications selected')).toBeInTheDocument()
+  })
+
+  it('select all checkbox selects all applications', () => {
+    renderWithProviders(<ApplicationList />)
+    const selectAll = screen.getByLabelText('Select all applications')
+    fireEvent.click(selectAll)
+    expect(screen.getByText('3 applications selected')).toBeInTheDocument()
+  })
+
+  it('clear selection button deselects all', () => {
+    renderWithProviders(<ApplicationList />)
+    fireEvent.click(screen.getByLabelText('Select all applications'))
+    expect(screen.getByText('3 applications selected')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Clear selection'))
+    expect(screen.queryByText('applications selected')).not.toBeInTheDocument()
+  })
+
+  it('delete selected opens confirmation dialog', () => {
+    renderWithProviders(<ApplicationList />)
+    fireEvent.click(screen.getByLabelText('Select my-api'))
+    fireEvent.click(screen.getByText('Delete selected'))
+    expect(screen.getByText('Delete applications')).toBeInTheDocument()
+    expect(screen.getByText('This action cannot be undone.')).toBeInTheDocument()
+  })
+
+  it('shows empty state when no applications', () => {
+    vi.mocked(useApplications).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    } as any)
+    renderWithProviders(<ApplicationList />)
+    expect(screen.getByText('No applications registered yet')).toBeInTheDocument()
+    expect(screen.getByText('Start Onboarding Wizard')).toBeInTheDocument()
   })
 })
 
