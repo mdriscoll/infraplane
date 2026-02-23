@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/matthewdriscoll/infraplane/internal/analyzer"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
@@ -17,6 +18,7 @@ type MockClient struct {
 	GenerateMigrationPlanFn      func(ctx context.Context, app domain.Application, resources []domain.Resource, from, to domain.CloudProvider) (MigrationPlanResult, error)
 	GenerateGraphFn              func(ctx context.Context, app domain.Application, resources []domain.Resource) (GraphResult, error)
 	GenerateTerraformHCLFn       func(ctx context.Context, resource domain.Resource, provider domain.CloudProvider, complianceContext string) (TerraformHCLResult, error)
+	GenerateFullTerraformFn      func(ctx context.Context, app domain.Application, resources []domain.Resource, provider domain.CloudProvider, target *domain.DeployTarget, complianceContext string) (FullTerraformResult, error)
 	GenerateDiscoveryCommandsFn  func(ctx context.Context, app domain.Application, codeCtx analyzer.CodeContext) (DiscoveryCommandResult, error)
 	ParseDiscoveryOutputFn       func(ctx context.Context, app domain.Application, outputs []CommandOutput) (LiveResourceParseResult, error)
 }
@@ -61,6 +63,90 @@ func (m *MockClient) GenerateTerraformHCL(ctx context.Context, resource domain.R
 		return m.GenerateTerraformHCLFn(ctx, resource, provider, complianceContext)
 	}
 	return TerraformHCLResult{HCL: `resource "example" "mock" { name = "` + resource.Name + `" }`}, nil
+}
+
+func (m *MockClient) GenerateFullTerraform(ctx context.Context, app domain.Application, resources []domain.Resource, provider domain.CloudProvider, target *domain.DeployTarget, complianceContext string) (FullTerraformResult, error) {
+	if m.GenerateFullTerraformFn != nil {
+		return m.GenerateFullTerraformFn(ctx, app, resources, provider, target, complianceContext)
+	}
+	return defaultFullTerraform(app, resources, provider), nil
+}
+
+func defaultFullTerraform(app domain.Application, resources []domain.Resource, provider domain.CloudProvider) FullTerraformResult {
+	var hclParts []string
+	var resList []FullTerraformResource
+
+	// Build a mock but realistic full config
+	switch provider {
+	case domain.ProviderGCP:
+		hclParts = append(hclParts, `terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+variable "project_id" {
+  type = string
+}
+
+variable "region" {
+  type    = string
+  default = "us-central1"
+}`)
+	case domain.ProviderAWS:
+		hclParts = append(hclParts, `terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+variable "region" {
+  type    = string
+  default = "us-east-1"
+}`)
+	}
+
+	for _, r := range resources {
+		mapping, ok := r.ProviderMappings[provider]
+		if !ok {
+			continue
+		}
+		resHCL := `resource "mock_` + string(r.Kind) + `" "` + sanitizeName(r.Name) + `" {
+  name = "` + r.Name + `"
+}`
+		hclParts = append(hclParts, resHCL)
+		resList = append(resList, FullTerraformResource{
+			ResourceName: r.Name,
+			ResourceKind: string(r.Kind),
+			ServiceName:  mapping.ServiceName,
+			HCL:          resHCL,
+		})
+	}
+
+	return FullTerraformResult{
+		HCL:       strings.Join(hclParts, "\n\n"),
+		Resources: resList,
+	}
+}
+
+// sanitizeName converts kebab-case to snake_case for Terraform resource names.
+func sanitizeName(name string) string {
+	return strings.ReplaceAll(name, "-", "_")
 }
 
 func defaultCodebaseRecommendations() []ResourceRecommendation {

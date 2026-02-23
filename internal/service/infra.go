@@ -51,9 +51,8 @@ func (s *InfraService) Apps() repository.ApplicationRepo { return s.apps }
 func (s *InfraService) Providers() *provider.Registry { return s.providers }
 
 // GenerateTerraform generates a complete Terraform configuration for an application
-// on its configured provider. If target is provided, the provider block uses
-// target-specific configuration (region, project, etc.).
-// For any resource missing pre-generated TerraformHCL, it calls the LLM to generate it.
+// on its configured provider using a single LLM call that produces a cohesive config
+// with all resources properly wired together.
 func (s *InfraService) GenerateTerraform(ctx context.Context, appID uuid.UUID, target *domain.DeployTarget) (string, error) {
 	app, err := s.apps.GetByID(ctx, appID)
 	if err != nil {
@@ -65,18 +64,19 @@ func (s *InfraService) GenerateTerraform(ctx context.Context, appID uuid.UUID, t
 		return "", fmt.Errorf("list resources: %w", err)
 	}
 
-	// Generate HCL for any resource that's missing it
-	resources, err = s.ensureHCL(ctx, app, resources)
+	// Build compliance context across all resources
+	complianceContext := s.buildComplianceContext(app, resources)
+
+	log.Printf("[infra] generating full Terraform config for %s (%d resources) on %s via single LLM call",
+		app.Name, len(resources), app.Provider)
+
+	result, err := s.llm.GenerateFullTerraform(ctx, app, resources, app.Provider, target, complianceContext)
 	if err != nil {
-		return "", fmt.Errorf("ensure terraform HCL: %w", err)
+		return "", fmt.Errorf("generate full terraform: %w", err)
 	}
 
-	config, err := terraform.GenerateConfig(app, resources, app.Provider, target)
-	if err != nil {
-		return "", fmt.Errorf("generate terraform: %w", err)
-	}
-
-	return config, nil
+	// Safety net: deduplicate any duplicate blocks the LLM may have produced
+	return terraform.DeduplicateHCL(result.HCL), nil
 }
 
 // ResourceHCL holds per-resource Terraform HCL details for the review UI.
@@ -89,7 +89,8 @@ type ResourceHCL struct {
 }
 
 // GenerateTerraformWithResources generates a complete Terraform configuration and
-// also returns per-resource HCL details for the review UI.
+// also returns per-resource HCL details for the review UI. Uses a single LLM call
+// that produces a cohesive config with all resources properly wired together.
 func (s *InfraService) GenerateTerraformWithResources(ctx context.Context, appID uuid.UUID, target *domain.DeployTarget) (string, []ResourceHCL, error) {
 	app, err := s.apps.GetByID(ctx, appID)
 	if err != nil {
@@ -101,102 +102,88 @@ func (s *InfraService) GenerateTerraformWithResources(ctx context.Context, appID
 		return "", nil, fmt.Errorf("list resources: %w", err)
 	}
 
-	// Generate HCL for any resource that's missing it
-	resources, err = s.ensureHCL(ctx, app, resources)
+	// Build compliance context across all resources
+	complianceContext := s.buildComplianceContext(app, resources)
+
+	log.Printf("[infra] generating full Terraform config with resource breakdown for %s (%d resources) on %s",
+		app.Name, len(resources), app.Provider)
+
+	result, err := s.llm.GenerateFullTerraform(ctx, app, resources, app.Provider, target, complianceContext)
 	if err != nil {
-		return "", nil, fmt.Errorf("ensure terraform HCL: %w", err)
+		return "", nil, fmt.Errorf("generate full terraform: %w", err)
 	}
 
-	// Collect per-resource HCL for the review UI
-	var resourceHCLs []ResourceHCL
+	// Build a lookup from resource name to resource ID for the review UI
+	resourceIDByName := make(map[string]uuid.UUID)
 	for _, r := range resources {
-		mapping, ok := r.ProviderMappings[app.Provider]
-		if !ok || mapping.TerraformHCL == "" {
-			continue
-		}
+		resourceIDByName[r.Name] = r.ID
+	}
+
+	// Map the LLM's per-resource breakdown to our ResourceHCL format
+	var resourceHCLs []ResourceHCL
+	for _, lr := range result.Resources {
 		resourceHCLs = append(resourceHCLs, ResourceHCL{
-			ResourceID:   r.ID,
-			ResourceName: r.Name,
-			ResourceKind: string(r.Kind),
-			ServiceName:  mapping.ServiceName,
-			HCL:          mapping.TerraformHCL,
+			ResourceID:   resourceIDByName[lr.ResourceName],
+			ResourceName: lr.ResourceName,
+			ResourceKind: lr.ResourceKind,
+			ServiceName:  lr.ServiceName,
+			HCL:          lr.HCL,
 		})
 	}
 
-	config, err := terraform.GenerateConfig(app, resources, app.Provider, target)
-	if err != nil {
-		return "", nil, fmt.Errorf("generate terraform: %w", err)
-	}
-
-	return config, resourceHCLs, nil
+	// Safety net: deduplicate any duplicate blocks the LLM may have produced
+	return terraform.DeduplicateHCL(result.HCL), resourceHCLs, nil
 }
 
-// ensureHCL iterates over resources and generates Terraform HCL via the LLM
-// for any resource that has a provider mapping but empty TerraformHCL.
-// Generated HCL is persisted back to the resource so future deploys skip LLM calls.
-func (s *InfraService) ensureHCL(ctx context.Context, app domain.Application, resources []domain.Resource) ([]domain.Resource, error) {
-	provider := app.Provider
+// buildComplianceContext collects compliance rules for all resources in an application
+// and returns a formatted string for the LLM prompt.
+func (s *InfraService) buildComplianceContext(app domain.Application, resources []domain.Resource) string {
+	if s.compliance == nil || len(app.ComplianceFrameworks) == 0 {
+		return ""
+	}
 
-	for i, r := range resources {
-		mapping, ok := r.ProviderMappings[provider]
+	var allRules []compliance.Rule
+	seen := make(map[string]bool)
+
+	for _, r := range resources {
+		mapping, ok := r.ProviderMappings[app.Provider]
 		if !ok {
 			continue
 		}
-		if mapping.TerraformHCL != "" {
-			continue
-		}
-
-		// Build compliance context for this resource
-		var complianceContext string
-		if s.compliance != nil && len(app.ComplianceFrameworks) > 0 {
-			rules := s.compliance.GetRulesForResource(
-				app.ComplianceFrameworks,
-				provider,
-				r.Kind,
-				mapping.ServiceName,
-			)
-			if len(rules) > 0 {
-				complianceContext = s.compliance.FormatRulesForPrompt(rules)
+		rules := s.compliance.GetRulesForResource(
+			app.ComplianceFrameworks,
+			app.Provider,
+			r.Kind,
+			mapping.ServiceName,
+		)
+		for _, rule := range rules {
+			key := rule.ID
+			if !seen[key] {
+				seen[key] = true
+				allRules = append(allRules, rule)
 			}
-		}
-
-		log.Printf("[infra] generating Terraform HCL for resource %s (%s) on %s", r.Name, r.Kind, provider)
-		result, err := s.llm.GenerateTerraformHCL(ctx, r, provider, complianceContext)
-		if err != nil {
-			return nil, fmt.Errorf("generate HCL for %s: %w", r.Name, err)
-		}
-
-		// Update the mapping with generated HCL
-		mapping.TerraformHCL = result.HCL
-		r.ProviderMappings[provider] = mapping
-		resources[i] = r
-
-		// Persist back to DB so future deploys skip this
-		if err := s.resources.Update(ctx, r); err != nil {
-			log.Printf("[infra] warning: failed to persist HCL for resource %s: %v", r.Name, err)
 		}
 	}
 
-	return resources, nil
+	if len(allRules) == 0 {
+		return ""
+	}
+
+	return s.compliance.FormatRulesForPrompt(allRules)
 }
 
-// DeployInfrastructure generates Terraform for the application, applies it via
-// the appropriate provider adapter, and creates a deployment record.
+// DeployInfrastructure generates Terraform for the application using a single LLM call,
+// applies it via the appropriate provider adapter, and creates a deployment record.
 func (s *InfraService) DeployInfrastructure(ctx context.Context, appID uuid.UUID, gitCommit, gitBranch string, target *domain.DeployTarget) (domain.Deployment, error) {
+	// Use GenerateTerraform (single LLM call) to produce the full config
+	config, err := s.GenerateTerraform(ctx, appID, target)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+
 	app, err := s.apps.GetByID(ctx, appID)
 	if err != nil {
 		return domain.Deployment{}, fmt.Errorf("get application: %w", err)
-	}
-
-	// Generate Terraform config
-	resources, err := s.resources.ListCurrentByApplicationID(ctx, appID)
-	if err != nil {
-		return domain.Deployment{}, fmt.Errorf("list resources: %w", err)
-	}
-
-	config, err := terraform.GenerateConfig(app, resources, app.Provider, target)
-	if err != nil {
-		return domain.Deployment{}, fmt.Errorf("generate terraform: %w", err)
 	}
 
 	// Create deployment record

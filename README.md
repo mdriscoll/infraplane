@@ -44,7 +44,7 @@ When you register an application, Infraplane:
 3. **Creates** cloud-agnostic resources — a `database`, a `cache`, a `queue` — independent of any provider
 4. **Maps** each resource to concrete cloud services: RDS vs. Cloud SQL, ElastiCache vs. Memorystore
 5. **Generates** a hosting plan with architecture recommendations and monthly cost estimates
-6. **Produces** production-ready Terraform HCL for every resource, with automatic deduplication
+6. **Produces** a complete Terraform configuration in a single LLM call — all resources properly wired together with shared infrastructure (VPC, subnets, IAM) declared once
 7. **Deploys** with a two-phase review flow: generate Terraform → review per-resource HCL → approve and apply
 
 ---
@@ -60,8 +60,8 @@ The analyzer extracts 16+ infrastructure file types from your project and feeds 
 ### Two-Phase Deploy with Terraform Review
 Deployments pause after Terraform generation so you can review before applying. The UI shows expandable per-resource HCL blocks — one for each cloud resource — with Approve & Apply or Reject buttons. The deploy pipeline streams real-time SSE events through each step: initialize → generate Terraform → review → validate credentials → apply.
 
-### Per-Resource Terraform Generation
-Select any resource from your plan and generate production-ready Terraform HCL for your chosen provider, with compliance rules baked in. HCL is deduplicated at assembly time so shared variables and infrastructure blocks don't collide across resources.
+### Single-Call Terraform Generation
+All resources for an application are sent to the LLM in one call, producing a complete, cohesive Terraform configuration where shared infrastructure (VPC, subnets, firewall rules, IAM) is declared once and all resources are properly wired together. The LLM also returns a per-resource HCL breakdown for the review UI. A deduplication safety net catches any remaining duplicate blocks.
 
 ### Live Resource Discovery
 Discover what's already running in your cloud account. Infraplane generates targeted CLI commands (`gcloud`, `aws`), executes them in a secure sandbox, and maps the results back to your application. Also supports GCP Cloud Asset Inventory for comprehensive project-wide scans.
@@ -292,7 +292,7 @@ Resource{
 }
 ```
 
-Each resource maps to concrete services on both providers. Terraform HCL is generated on demand per resource and deduplicated when assembled into a single configuration.
+Each resource maps to concrete services on both providers. At deploy time, all resources are sent to the LLM in a single call to produce one cohesive Terraform config with shared infrastructure wired correctly.
 
 ### Supported Resource Kinds
 
@@ -327,8 +327,7 @@ Infraplane uses a two-phase deployment model with a human review gate:
 ```
 Phase 1 (automatic):
   Initialize workspace
-  → Generate Terraform HCL for each resource (LLM-powered)
-  → Deduplicate shared blocks (variables, VPCs, outputs)
+  → Generate complete Terraform config (single LLM call, all resources)
   → Pause at "awaiting_approval" status
 
   ┌─────────────────────────────────┐
@@ -372,7 +371,7 @@ infraplane/
 │   ├── llm/                            # LLM integration
 │   │   ├── anthropic.go                # Anthropic SDK client (Sonnet 4.5)
 │   │   ├── client.go                   # Client interface
-│   │   ├── prompts.go                  # Prompt templates (7+ tasks)
+│   │   ├── prompts.go                  # Prompt templates (8 tasks incl. full-config)
 │   │   └── mock.go                     # Mock client for tests
 │   ├── service/                        # Business logic (7 services)
 │   │   ├── application.go              # CRUD + auto-detect + onboarding
@@ -381,7 +380,7 @@ infraplane/
 │   │   ├── graph.go                    # Topology graph generation
 │   │   ├── discovery.go                # Live resource discovery
 │   │   ├── deployment.go               # Two-phase deploy (Execute → Review → Resume)
-│   │   ├── infra.go                    # Terraform generation + provider orchestration
+│   │   ├── infra.go                    # Single-call Terraform generation + provider orchestration
 │   │   └── eventstore.go              # In-memory SSE event store with pause/resume
 │   ├── repository/                     # Data access layer
 │   │   ├── interfaces.go               # Repository interfaces

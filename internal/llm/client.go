@@ -34,9 +34,24 @@ type GraphResult struct {
 	Edges []domain.GraphEdge `json:"edges"`
 }
 
-// TerraformHCLResult is the LLM's output for Terraform HCL generation.
+// TerraformHCLResult is the LLM's output for single-resource Terraform HCL generation.
 type TerraformHCLResult struct {
 	HCL string `json:"hcl"`
+}
+
+// FullTerraformResource describes one resource's HCL within a full config.
+type FullTerraformResource struct {
+	ResourceName string `json:"resource_name"`
+	ResourceKind string `json:"resource_kind"`
+	ServiceName  string `json:"service_name"`
+	HCL          string `json:"hcl"`
+}
+
+// FullTerraformResult is the LLM's output for a complete Terraform configuration
+// generated from all of an application's resources in a single call.
+type FullTerraformResult struct {
+	HCL       string                  `json:"hcl"`
+	Resources []FullTerraformResource `json:"resources"`
 }
 
 // DiscoveryCommand represents a single CLI command to run for resource discovery.
@@ -90,6 +105,12 @@ type Client interface {
 	// GenerateTerraformHCL generates Terraform HCL for a single resource.
 	// complianceContext contains formatted compliance rules to inject into the prompt (empty string if none).
 	GenerateTerraformHCL(ctx context.Context, resource domain.Resource, provider domain.CloudProvider, complianceContext string) (TerraformHCLResult, error)
+
+	// GenerateFullTerraform generates a complete, cohesive Terraform configuration
+	// for ALL of an application's resources in a single LLM call. This ensures
+	// shared infrastructure (VPC, subnets, IAM) is declared once and all resources
+	// are properly wired together. Returns the full HCL and per-resource breakdowns.
+	GenerateFullTerraform(ctx context.Context, app domain.Application, resources []domain.Resource, provider domain.CloudProvider, target *domain.DeployTarget, complianceContext string) (FullTerraformResult, error)
 
 	// GenerateDiscoveryCommands analyzes deploy scripts and generates CLI commands
 	// to discover live cloud resources for the given provider.

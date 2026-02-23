@@ -163,6 +163,23 @@ func (c *AnthropicClient) GenerateTerraformHCL(ctx context.Context, resource dom
 	return result, nil
 }
 
+func (c *AnthropicClient) GenerateFullTerraform(ctx context.Context, app domain.Application, resources []domain.Resource, provider domain.CloudProvider, target *domain.DeployTarget, complianceContext string) (FullTerraformResult, error) {
+	prompt := buildFullTerraformPrompt(app, resources, provider, target, complianceContext)
+
+	// Use a large token limit — full configs with many resources can be large.
+	// Sonnet 4.5 supports up to 128k output tokens.
+	resp, err := c.sendMessage(ctx, prompt, fullTerraformSystemPrompt, 32768)
+	if err != nil {
+		return FullTerraformResult{}, fmt.Errorf("generate full terraform: %w", err)
+	}
+
+	var result FullTerraformResult
+	if err := json.Unmarshal([]byte(resp), &result); err != nil {
+		return FullTerraformResult{}, fmt.Errorf("parse full terraform: %w", err)
+	}
+	return result, nil
+}
+
 func (c *AnthropicClient) GenerateDiscoveryCommands(ctx context.Context, app domain.Application, codeCtx analyzer.CodeContext) (DiscoveryCommandResult, error) {
 	prompt := buildDiscoveryCommandsPrompt(app, codeCtx)
 

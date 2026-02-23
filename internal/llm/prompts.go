@@ -388,6 +388,95 @@ func buildTerraformHCLPrompt(resource domain.Resource, provider domain.CloudProv
 	return sb.String()
 }
 
+const fullTerraformSystemPrompt = `You are an expert cloud infrastructure architect specializing in Terraform. Generate a complete, production-ready Terraform configuration for an entire application — all resources together in a single cohesive file.
+
+Respond with ONLY a JSON object (no markdown fences, no explanation):
+
+{
+  "hcl": "The complete Terraform HCL configuration (provider blocks, shared infra, all resources, outputs)",
+  "resources": [
+    {
+      "resource_name": "the-resource-name",
+      "resource_kind": "database|compute|storage|cache|queue|cdn|network|secrets|policy",
+      "service_name": "The cloud service (e.g. Cloud SQL, RDS)",
+      "hcl": "Just the HCL blocks specific to this resource (for the review UI)"
+    }
+  ]
+}
+
+The "hcl" field must contain a COMPLETE, VALID Terraform configuration that includes:
+1. The terraform {} block with required_providers
+2. The provider block with region/project configuration
+3. Shared infrastructure declared ONCE (VPC, subnets, firewall rules, service accounts)
+4. ALL resource blocks properly wired to shared infrastructure and to each other
+5. Variables for configurable values (project_id, region, environment, etc.)
+6. Outputs for important values (URLs, IPs, connection strings)
+
+The "resources" array must contain one entry per application resource, where each entry's "hcl" field contains ONLY the Terraform blocks specific to that resource (not shared infra). This is used to show per-resource breakdown in the review UI.
+
+CRITICAL requirements:
+- Shared infrastructure (VPC, subnets, firewalls, service accounts) MUST be declared exactly once
+- ALL resources MUST reference the same shared infrastructure using Terraform references (e.g. google_compute_network.vpc.id)
+- Resources that need to communicate MUST be on the same network
+- Use proper Terraform references between resources — no hardcoded IDs
+- Include IAM bindings, security groups, and firewall rules as needed
+- Tags/labels on all resources including Name and Environment
+- Follow Terraform best practices for the target provider
+- If compliance requirements are provided, satisfy every listed rule with a comment referencing the rule ID (e.g. # CIS 6.4)
+- Use the latest Terraform provider syntax`
+
+func buildFullTerraformPrompt(app domain.Application, resources []domain.Resource, provider domain.CloudProvider, target *domain.DeployTarget, complianceContext string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Generate a complete Terraform configuration for the following application on %s.\n\n", provider))
+	sb.WriteString(fmt.Sprintf("Application: %s\n", app.Name))
+	sb.WriteString(fmt.Sprintf("Description: %s\n", app.Description))
+	sb.WriteString(fmt.Sprintf("Provider: %s\n", provider))
+
+	// Include deploy target details so the LLM can set correct region/project
+	if target != nil {
+		sb.WriteString("\nDeploy Target:\n")
+		if target.GCPProjectID != "" {
+			sb.WriteString(fmt.Sprintf("  GCP Project: %s\n", target.GCPProjectID))
+		}
+		if target.GCPRegion != "" {
+			sb.WriteString(fmt.Sprintf("  GCP Region: %s\n", target.GCPRegion))
+		}
+		if target.AWSRegion != "" {
+			sb.WriteString(fmt.Sprintf("  AWS Region: %s\n", target.AWSRegion))
+		}
+		if target.AWSRoleARN != "" {
+			sb.WriteString(fmt.Sprintf("  AWS Role ARN: %s\n", target.AWSRoleARN))
+		}
+	}
+
+	sb.WriteString("\nResources:\n")
+	if len(resources) == 0 {
+		sb.WriteString("  (none — generate a minimal config with just the provider block)\n")
+	}
+	for _, r := range resources {
+		specStr := "{}"
+		if len(r.Spec) > 0 {
+			specStr = string(r.Spec)
+		}
+		sb.WriteString(fmt.Sprintf("\n- Name: %s\n", r.Name))
+		sb.WriteString(fmt.Sprintf("  Kind: %s\n", r.Kind))
+		sb.WriteString(fmt.Sprintf("  Spec: %s\n", specStr))
+
+		if mapping, ok := r.ProviderMappings[provider]; ok {
+			configJSON, _ := json.Marshal(mapping.Config)
+			sb.WriteString(fmt.Sprintf("  Provider Service: %s\n", mapping.ServiceName))
+			sb.WriteString(fmt.Sprintf("  Provider Config: %s\n", string(configJSON)))
+		}
+	}
+
+	if complianceContext != "" {
+		sb.WriteString("\n")
+		sb.WriteString(complianceContext)
+	}
+
+	return sb.String()
+}
+
 const discoveryCommandsSystemPrompt = `You are an expert cloud infrastructure architect. Your job is to analyze deploy scripts and configuration files from an application and generate CLI commands that will list the actual live resources deployed in the cloud.
 
 You must respond with ONLY a JSON object (no markdown, no explanation):
