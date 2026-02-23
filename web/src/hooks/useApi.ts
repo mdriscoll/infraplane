@@ -410,10 +410,28 @@ export function useDeploymentReconnect(deploymentId: string | null) {
       const event: DeploymentEvent = JSON.parse(e.data)
       setEvents((prev) => [...prev, event])
 
-      // Detect awaiting_approval step
+      // Collect per-resource HCL from generating_terraform events
+      if (event.step === 'generating_terraform' && event.detail) {
+        try {
+          const parsed = JSON.parse(event.detail)
+          if (parsed.resource_id && parsed.hcl) {
+            setResourceHCLs((prev) => [...prev, parsed as ResourceHCLDetail])
+          }
+        } catch {
+          // Not a resource HCL event, ignore
+        }
+      }
+
+      // Detect awaiting_approval — extract any resources from replayed events
       if (event.step === 'awaiting_approval') {
         setIsAwaitingApproval(true)
         setIsStreaming(false)
+        // Also extract from all accumulated events (handles replayed events
+        // where React state updates haven't flushed yet)
+        setEvents((prev) => {
+          setResourceHCLs(extractResourceHCLs(prev))
+          return prev
+        })
         es.close()
       }
 
