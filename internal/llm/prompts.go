@@ -345,7 +345,7 @@ The "hcl" field should contain valid, production-ready Terraform HCL that includ
 - The main resource block with all necessary configuration
 - Any required supporting resources specific to THIS resource (e.g. IAM roles, security groups)
 - Variable declarations ONLY for values unique to this resource (e.g. database name, instance size)
-- Tags including Name and Environment
+- Tags/labels including name and environment (GCP labels MUST be all-lowercase, e.g. "name", "environment" — never capitalized)
 
 IMPORTANT — the following are provided by the assembly framework and must NOT be included in your output:
 - Do NOT declare variable "project_id", variable "region", or variable "environment" — reference them as var.project_id, var.region, var.environment
@@ -420,7 +420,7 @@ CRITICAL requirements:
 - Resources that need to communicate MUST be on the same network
 - Use proper Terraform references between resources — no hardcoded IDs
 - Include IAM bindings, security groups, and firewall rules as needed
-- Tags/labels on all resources including Name and Environment
+- Tags/labels on all resources including name and environment (GCP labels MUST be all-lowercase with hyphens, e.g. "name", "environment", "application" — never capitalized)
 - Follow Terraform best practices for the target provider
 - If compliance requirements are provided, satisfy every listed rule with a comment referencing the rule ID (e.g. # CIS 6.4)
 - Use the latest Terraform provider syntax`

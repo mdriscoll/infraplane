@@ -1,15 +1,17 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useGCPCredentialStatus, useUploadGCPCredentials, useDeleteGCPCredentials } from '../hooks/useApi'
 
 interface Props {
   onProjectDetected?: (projectId: string) => void
+  compact?: boolean
 }
 
-export default function GCPCredentialUpload({ onProjectDetected }: Props) {
+export default function GCPCredentialUpload({ onProjectDetected, compact }: Props) {
   const { data: credStatus, isLoading } = useGCPCredentialStatus()
   const uploadMutation = useUploadGCPCredentials()
   const deleteMutation = useDeleteGCPCredentials()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [showFull, setShowFull] = useState(false)
 
   const handleUpload = () => {
     const file = fileInputRef.current?.files?.[0]
@@ -20,18 +22,42 @@ export default function GCPCredentialUpload({ onProjectDetected }: Props) {
         if (data.project_id && onProjectDetected) {
           onProjectDetected(data.project_id)
         }
+        setShowFull(false)
       },
     })
   }
 
   const handleRemove = () => {
-    deleteMutation.mutate()
+    deleteMutation.mutate(undefined, {
+      onSuccess: () => setShowFull(false),
+    })
   }
 
   if (isLoading) {
     return (
       <div className="p-3 border border-gray-200 rounded-lg bg-gray-50">
         <p className="text-sm text-gray-400">Checking GCP credentials...</p>
+      </div>
+    )
+  }
+
+  // Compact mode: show single-line when credentials exist
+  if (compact && credStatus?.configured && !showFull) {
+    return (
+      <div className="flex items-center gap-2 py-1">
+        <span className="text-green-600 text-sm">{'\u2713'}</span>
+        <span className="text-sm text-gray-700">
+          Using <strong className="font-medium">{credStatus.client_email}</strong>
+        </span>
+        {credStatus.project_id && (
+          <span className="text-xs text-gray-500">({credStatus.project_id})</span>
+        )}
+        <button
+          onClick={() => setShowFull(true)}
+          className="text-xs text-indigo-600 hover:text-indigo-800 underline ml-1 transition-colors"
+        >
+          Change
+        </button>
       </div>
     )
   }
@@ -51,13 +77,23 @@ export default function GCPCredentialUpload({ onProjectDetected }: Props) {
               </span>
             )}
           </div>
-          <button
-            onClick={handleRemove}
-            disabled={deleteMutation.isPending}
-            className="text-xs text-red-500 hover:text-red-700 underline disabled:opacity-50"
-          >
-            {deleteMutation.isPending ? 'Removing...' : 'Remove'}
-          </button>
+          <div className="flex items-center gap-3">
+            {compact && (
+              <button
+                onClick={() => setShowFull(false)}
+                className="text-xs text-gray-500 hover:text-gray-700 underline"
+              >
+                Collapse
+              </button>
+            )}
+            <button
+              onClick={handleRemove}
+              disabled={deleteMutation.isPending}
+              className="text-xs text-red-500 hover:text-red-700 underline disabled:opacity-50"
+            >
+              {deleteMutation.isPending ? 'Removing...' : 'Remove'}
+            </button>
+          </div>
         </div>
       </div>
     )

@@ -7,9 +7,11 @@ interface TerraformReviewProps {
   onApprove: () => void
   onReject: () => void
   isApproving: boolean
+  approveLabel?: string
+  rejectLabel?: string
 }
 
-export default function TerraformReview({ resourceHCLs, onApprove, onReject, isApproving }: TerraformReviewProps) {
+export default function TerraformReview({ resourceHCLs, onApprove, onReject, isApproving, approveLabel, rejectLabel }: TerraformReviewProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
   const toggleExpand = (id: string) => {
@@ -106,14 +108,14 @@ export default function TerraformReview({ resourceHCLs, onApprove, onReject, isA
           className="inline-flex items-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium transition-colors"
         >
           {isApproving && <Spinner />}
-          {isApproving ? 'Applying...' : 'Approve & Apply'}
+          {isApproving ? 'Deploying...' : (approveLabel || 'Approve & Apply')}
         </button>
         <button
           onClick={onReject}
           disabled={isApproving}
           className="border border-red-200 text-red-600 px-5 py-2.5 rounded-lg hover:bg-red-50 disabled:opacity-50 text-sm font-medium transition-colors"
         >
-          Reject
+          {rejectLabel || 'Reject'}
         </button>
       </div>
     </div>
