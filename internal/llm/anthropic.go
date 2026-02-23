@@ -211,14 +211,14 @@ func (c *AnthropicClient) ParseDiscoveryOutput(ctx context.Context, app domain.A
 }
 
 // sendMessage sends a message to the Anthropic API and extracts the text response.
-// The SDK auto-calculates an appropriate timeout based on maxTokens (up to 10 min).
-// We do NOT set a manual context timeout — the SDK handles this correctly.
+// It uses streaming to avoid the Anthropic 10-minute timeout limit on non-streaming
+// requests. The stream is accumulated into a full message before returning.
 func (c *AnthropicClient) sendMessage(ctx context.Context, userPrompt, systemPrompt string, maxTokens int64) (string, error) {
 	start := time.Now()
-	log.Printf("[llm] sending request: model=%s max_tokens=%d prompt_len=%d system_len=%d",
+	log.Printf("[llm] sending streaming request: model=%s max_tokens=%d prompt_len=%d system_len=%d",
 		c.model, maxTokens, len(userPrompt), len(systemPrompt))
 
-	resp, err := c.client.Messages.New(ctx, anthropic.MessageNewParams{
+	stream := c.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
 		Model:     c.model,
 		MaxTokens: maxTokens,
 		System: []anthropic.TextBlockParam{
@@ -228,24 +228,38 @@ func (c *AnthropicClient) sendMessage(ctx context.Context, userPrompt, systemPro
 			anthropic.NewUserMessage(anthropic.NewTextBlock(userPrompt)),
 		},
 	})
-	elapsed := time.Since(start)
-	if err != nil {
-		log.Printf("[llm] API error after %s: %v", elapsed.Round(time.Millisecond), err)
+	defer stream.Close()
+
+	// Accumulate all stream events into a complete message
+	message := anthropic.Message{}
+	for stream.Next() {
+		event := stream.Current()
+		if err := message.Accumulate(event); err != nil {
+			elapsed := time.Since(start)
+			log.Printf("[llm] accumulate error after %s: %v", elapsed.Round(time.Millisecond), err)
+			return "", fmt.Errorf("anthropic stream accumulate: %w", err)
+		}
+	}
+
+	if err := stream.Err(); err != nil {
+		elapsed := time.Since(start)
+		log.Printf("[llm] stream error after %s: %v", elapsed.Round(time.Millisecond), err)
 		return "", fmt.Errorf("anthropic API call: %w", err)
 	}
 
+	elapsed := time.Since(start)
 	log.Printf("[llm] response received in %s: stop_reason=%s input_tokens=%d output_tokens=%d",
-		elapsed.Round(time.Millisecond), resp.StopReason,
-		resp.Usage.InputTokens, resp.Usage.OutputTokens)
+		elapsed.Round(time.Millisecond), message.StopReason,
+		message.Usage.InputTokens, message.Usage.OutputTokens)
 
 	// Check if the response was truncated
-	if resp.StopReason == "max_tokens" {
-		log.Printf("[llm] WARNING: response truncated at %d output tokens", resp.Usage.OutputTokens)
+	if message.StopReason == "max_tokens" {
+		log.Printf("[llm] WARNING: response truncated at %d output tokens", message.Usage.OutputTokens)
 		return "", fmt.Errorf("response truncated (hit %d token limit) — try reducing prompt complexity", maxTokens)
 	}
 
 	// Extract text from response
-	for _, block := range resp.Content {
+	for _, block := range message.Content {
 		if block.Type == "text" {
 			return extractJSON(block.Text), nil
 		}

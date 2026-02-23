@@ -4,7 +4,9 @@ package credentials
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -25,20 +27,90 @@ type CredentialInfo struct {
 }
 
 // Store manages the lifecycle of an uploaded GCP service account key.
-// It is process-scoped (not persisted to a database) and thread-safe.
+// It persists the key to a stable file path so it survives server restarts.
 type Store struct {
 	mu       sync.RWMutex
-	filePath string          // path to temp file holding the key
+	filePath string          // stable path holding the key
 	info     *CredentialInfo // parsed metadata from the key JSON
 }
 
-// NewStore creates a new credential store.
+// dataDir returns the directory used to persist credential files.
+// It uses $HOME/.infraplane/credentials/ and creates it if needed.
+func dataDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home directory: %w", err)
+	}
+	dir := filepath.Join(home, ".infraplane", "credentials")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", fmt.Errorf("create credentials directory: %w", err)
+	}
+	return dir, nil
+}
+
+// keyFilePath returns the stable path for the GCP service account key.
+func keyFilePath() (string, error) {
+	dir, err := dataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "gcp-service-account.json"), nil
+}
+
+// NewStore creates a new credential store and loads any previously persisted credentials.
 func NewStore() *Store {
-	return &Store{}
+	s := &Store{}
+	// Attempt to load persisted credentials from disk
+	if err := s.loadFromDisk(); err != nil {
+		log.Printf("[credentials] no persisted credentials found: %v", err)
+	}
+	return s
+}
+
+// loadFromDisk checks for an existing credential file and restores state from it.
+func (s *Store) loadFromDisk() error {
+	path, err := keyFilePath()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read credential file: %w", err)
+	}
+
+	var key serviceAccountKey
+	if err := json.Unmarshal(data, &key); err != nil {
+		return fmt.Errorf("parse credential file: %w", err)
+	}
+
+	if key.Type != "service_account" || key.ProjectID == "" || key.ClientEmail == "" {
+		return fmt.Errorf("invalid persisted credential file")
+	}
+
+	// Get file mod time as the "uploaded at" timestamp
+	stat, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat credential file: %w", err)
+	}
+
+	s.filePath = path
+	s.info = &CredentialInfo{
+		ProjectID:   key.ProjectID,
+		ClientEmail: key.ClientEmail,
+		UploadedAt:  stat.ModTime().UTC(),
+	}
+
+	// Set env var so all GCP SDK clients use this key
+	os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", s.filePath)
+	log.Printf("[credentials] restored GCP credentials for %s (project: %s)", key.ClientEmail, key.ProjectID)
+
+	return nil
 }
 
 // Save validates and stores a GCP service account key JSON.
-// It writes the key to a temp file and sets GOOGLE_APPLICATION_CREDENTIALS so all GCP SDK clients pick it up.
+// It writes the key to a stable file path and sets GOOGLE_APPLICATION_CREDENTIALS
+// so all GCP SDK clients pick it up. The key persists across server restarts.
 func (s *Store) Save(keyJSON []byte) (*CredentialInfo, error) {
 	// Parse and validate the key
 	var key serviceAccountKey
@@ -56,32 +128,42 @@ func (s *Store) Save(keyJSON []byte) (*CredentialInfo, error) {
 		return nil, fmt.Errorf("service account key missing client_email")
 	}
 
-	// Write to a temp file with restrictive permissions
-	tmpFile, err := os.CreateTemp("", "infraplane-gcp-key-*.json")
+	// Determine the stable file path
+	path, err := keyFilePath()
+	if err != nil {
+		return nil, fmt.Errorf("get key file path: %w", err)
+	}
+
+	// Write atomically: write to temp file in same dir, then rename
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, ".gcp-key-tmp-*.json")
 	if err != nil {
 		return nil, fmt.Errorf("create temp file: %w", err)
 	}
-	if err := os.Chmod(tmpFile.Name(), 0600); err != nil {
+	tmpPath := tmpFile.Name()
+
+	if err := os.Chmod(tmpPath, 0600); err != nil {
 		tmpFile.Close()
-		os.Remove(tmpFile.Name())
+		os.Remove(tmpPath)
 		return nil, fmt.Errorf("set file permissions: %w", err)
 	}
 	if _, err := tmpFile.Write(keyJSON); err != nil {
 		tmpFile.Close()
-		os.Remove(tmpFile.Name())
+		os.Remove(tmpPath)
 		return nil, fmt.Errorf("write key file: %w", err)
 	}
 	tmpFile.Close()
 
+	// Atomic rename
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return nil, fmt.Errorf("persist key file: %w", err)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Clean up any existing key file
-	if s.filePath != "" {
-		os.Remove(s.filePath)
-	}
-
-	s.filePath = tmpFile.Name()
+	s.filePath = path
 	s.info = &CredentialInfo{
 		ProjectID:   key.ProjectID,
 		ClientEmail: key.ClientEmail,
@@ -90,6 +172,7 @@ func (s *Store) Save(keyJSON []byte) (*CredentialInfo, error) {
 
 	// Set env var so all GCP SDK clients use this key
 	os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", s.filePath)
+	log.Printf("[credentials] saved GCP credentials for %s (project: %s)", key.ClientEmail, key.ProjectID)
 
 	return s.info, nil
 }
@@ -113,6 +196,7 @@ func (s *Store) Delete() error {
 	s.info = nil
 
 	os.Unsetenv("GOOGLE_APPLICATION_CREDENTIALS")
+	log.Printf("[credentials] deleted GCP credentials")
 	return nil
 }
 
