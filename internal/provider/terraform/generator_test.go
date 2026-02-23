@@ -229,7 +229,7 @@ resource "google_redis_instance" "cache" {
   project = var.project_id
 }
 `
-		result := deduplicateHCL(input)
+		result := DeduplicateHCL(input)
 
 		// Should contain exactly one variable "project_id"
 		count := strings.Count(result, `variable "project_id"`)
@@ -264,7 +264,7 @@ resource "google_redis_instance" "cache" {
   network = google_compute_network.vpc.id
 }
 `
-		result := deduplicateHCL(input)
+		result := DeduplicateHCL(input)
 
 		count := strings.Count(result, `resource "google_compute_network" "vpc"`)
 		if count != 1 {
@@ -291,7 +291,7 @@ output "service_url" {
   value = google_cloud_run_service.app.url
 }
 `
-		result := deduplicateHCL(input)
+		result := DeduplicateHCL(input)
 
 		count := strings.Count(result, `output "service_url"`)
 		if count != 1 {
@@ -320,7 +320,7 @@ resource "google_redis_instance" "cache" {
   project = var.project_id
 }
 `
-		result := deduplicateHCL(input)
+		result := DeduplicateHCL(input)
 
 		// All blocks are unique — nothing should be removed
 		if !strings.Contains(result, `variable "project_id"`) {
@@ -361,7 +361,7 @@ resource "google_compute_network" "vpc" {
   }
 }
 `
-		result := deduplicateHCL(input)
+		result := DeduplicateHCL(input)
 
 		count := strings.Count(result, `resource "google_compute_network" "vpc"`)
 		if count != 1 {
@@ -386,7 +386,7 @@ resource "google_sql_database_instance" "db" {
 data "google_project" "current" {
 }
 `
-		result := deduplicateHCL(input)
+		result := DeduplicateHCL(input)
 
 		count := strings.Count(result, `data "google_project" "current"`)
 		if count != 1 {
@@ -409,7 +409,7 @@ variable "project_id" {
 resource "google_sql_database_instance" "db" {
 }
 `
-		result := deduplicateHCL(input)
+		result := DeduplicateHCL(input)
 
 		count := strings.Count(result, `variable "project_id"`)
 		if count != 1 {

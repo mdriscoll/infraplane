@@ -124,7 +124,7 @@ func GenerateConfig(app domain.Application, resources []domain.Resource, provide
 
 	// Deduplicate variables, outputs, and shared resources that appear in
 	// multiple per-resource HCL blocks (e.g. variable "project_id", VPC, subnet).
-	return deduplicateHCL(sb.String()), nil
+	return DeduplicateHCL(sb.String()), nil
 }
 
 // GenerateResourceHCL returns just the Terraform HCL for a single resource
@@ -137,11 +137,11 @@ func GenerateResourceHCL(resource domain.Resource, provider domain.CloudProvider
 	return mapping.TerraformHCL
 }
 
-// deduplicateHCL removes duplicate top-level HCL blocks from a combined
+// DeduplicateHCL removes duplicate top-level HCL blocks from a combined
 // Terraform configuration. When multiple resources are generated independently,
 // each may include its own variable, output, or shared infrastructure blocks.
 // This function keeps only the first occurrence of each unique block.
-func deduplicateHCL(hcl string) string {
+func DeduplicateHCL(hcl string) string {
 	lines := strings.Split(hcl, "\n")
 	seen := make(map[string]bool)
 	var result []string

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/matthewdriscoll/infraplane/internal/domain"
+	"github.com/matthewdriscoll/infraplane/internal/provider/terraform"
 	"github.com/matthewdriscoll/infraplane/internal/repository"
 )
 
@@ -248,7 +249,9 @@ func (s *DeploymentService) Resume(
 	d.Status = domain.DeploymentInProgress
 	_ = s.deployments.Update(ctx, d)
 
-	hcl := d.TerraformPlan // Stored from phase 1
+	// Deduplicate HCL stored from phase 1 — older deployments may have
+	// duplicate variables/resources from before the dedup fix was added.
+	hcl := terraform.DeduplicateHCL(d.TerraformPlan)
 
 	// 1. Validate Credentials
 	emit(domain.StepValidatingCredentials, "Validating cloud credentials...", domain.DeploymentInProgress, "")
