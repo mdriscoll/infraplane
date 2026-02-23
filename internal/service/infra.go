@@ -79,6 +79,58 @@ func (s *InfraService) GenerateTerraform(ctx context.Context, appID uuid.UUID, t
 	return config, nil
 }
 
+// ResourceHCL holds per-resource Terraform HCL details for the review UI.
+type ResourceHCL struct {
+	ResourceID   uuid.UUID `json:"resource_id"`
+	ResourceName string    `json:"resource_name"`
+	ResourceKind string    `json:"resource_kind"`
+	ServiceName  string    `json:"service_name"`
+	HCL          string    `json:"hcl"`
+}
+
+// GenerateTerraformWithResources generates a complete Terraform configuration and
+// also returns per-resource HCL details for the review UI.
+func (s *InfraService) GenerateTerraformWithResources(ctx context.Context, appID uuid.UUID, target *domain.DeployTarget) (string, []ResourceHCL, error) {
+	app, err := s.apps.GetByID(ctx, appID)
+	if err != nil {
+		return "", nil, fmt.Errorf("get application: %w", err)
+	}
+
+	resources, err := s.resources.ListCurrentByApplicationID(ctx, appID)
+	if err != nil {
+		return "", nil, fmt.Errorf("list resources: %w", err)
+	}
+
+	// Generate HCL for any resource that's missing it
+	resources, err = s.ensureHCL(ctx, app, resources)
+	if err != nil {
+		return "", nil, fmt.Errorf("ensure terraform HCL: %w", err)
+	}
+
+	// Collect per-resource HCL for the review UI
+	var resourceHCLs []ResourceHCL
+	for _, r := range resources {
+		mapping, ok := r.ProviderMappings[app.Provider]
+		if !ok || mapping.TerraformHCL == "" {
+			continue
+		}
+		resourceHCLs = append(resourceHCLs, ResourceHCL{
+			ResourceID:   r.ID,
+			ResourceName: r.Name,
+			ResourceKind: string(r.Kind),
+			ServiceName:  mapping.ServiceName,
+			HCL:          mapping.TerraformHCL,
+		})
+	}
+
+	config, err := terraform.GenerateConfig(app, resources, app.Provider, target)
+	if err != nil {
+		return "", nil, fmt.Errorf("generate terraform: %w", err)
+	}
+
+	return config, resourceHCLs, nil
+}
+
 // ensureHCL iterates over resources and generates Terraform HCL via the LLM
 // for any resource that has a provider mapping but empty TerraformHCL.
 // Generated HCL is persisted back to the resource so future deploys skip LLM calls.

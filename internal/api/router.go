@@ -88,6 +88,10 @@ func NewRouter(
 		r.Get("/deployments/{id}/stream", h.DeployStream)
 		r.Get("/deployments/{id}/events", h.GetDeploymentEvents)
 		r.Get("/deployments/{id}/events/stream", h.DeployStreamReconnect)
+
+		// Deployment approval/rejection (review before apply)
+		r.Get("/deployments/{id}/approve", h.ApproveDeployment)
+		r.Post("/deployments/{id}/reject", h.RejectDeployment)
 	})
 
 	// Health check

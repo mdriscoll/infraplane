@@ -2,10 +2,19 @@ package terraform
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/matthewdriscoll/infraplane/internal/domain"
 )
+
+// blockHeaderPattern matches the start of top-level HCL blocks:
+//   variable "name" {
+//   resource "type" "name" {
+//   output "name" {
+//   data "type" "name" {
+//   locals {
+var blockHeaderPattern = regexp.MustCompile(`^(variable|resource|output|data|locals)\s+("([^"]+)"\s*("([^"]+)")?\s*)?{`)
 
 // GenerateProviderBlock builds the terraform + provider blocks dynamically
 // based on the cloud provider and an optional deploy target.
@@ -113,7 +122,9 @@ func GenerateConfig(app domain.Application, resources []domain.Resource, provide
 		sb.WriteString("# No resources with Terraform mappings for this provider.\n")
 	}
 
-	return sb.String(), nil
+	// Deduplicate variables, outputs, and shared resources that appear in
+	// multiple per-resource HCL blocks (e.g. variable "project_id", VPC, subnet).
+	return deduplicateHCL(sb.String()), nil
 }
 
 // GenerateResourceHCL returns just the Terraform HCL for a single resource
@@ -124,4 +135,73 @@ func GenerateResourceHCL(resource domain.Resource, provider domain.CloudProvider
 		return ""
 	}
 	return mapping.TerraformHCL
+}
+
+// deduplicateHCL removes duplicate top-level HCL blocks from a combined
+// Terraform configuration. When multiple resources are generated independently,
+// each may include its own variable, output, or shared infrastructure blocks.
+// This function keeps only the first occurrence of each unique block.
+func deduplicateHCL(hcl string) string {
+	lines := strings.Split(hcl, "\n")
+	seen := make(map[string]bool)
+	var result []string
+	i := 0
+
+	for i < len(lines) {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		// Check if this line starts a top-level HCL block
+		matches := blockHeaderPattern.FindStringSubmatch(trimmed)
+		if matches == nil {
+			// Not a block header — keep the line as-is
+			result = append(result, line)
+			i++
+			continue
+		}
+
+		// Build a signature for this block to detect duplicates
+		// matches[1] = block type (variable, resource, output, data, locals)
+		// matches[3] = first quoted name (e.g. "project_id" for variable, "google_compute_network" for resource)
+		// matches[5] = second quoted name (e.g. "vpc" for resource "google_compute_network" "vpc")
+		blockType := matches[1]
+		sig := blockType
+		if matches[3] != "" {
+			sig += ":" + matches[3]
+		}
+		if matches[5] != "" {
+			sig += ":" + matches[5]
+		}
+
+		// Find the end of this block by tracking brace depth
+		blockStart := i
+		depth := 0
+		for i < len(lines) {
+			for _, ch := range lines[i] {
+				if ch == '{' {
+					depth++
+				} else if ch == '}' {
+					depth--
+				}
+			}
+			i++
+			if depth == 0 {
+				break
+			}
+		}
+
+		if seen[sig] {
+			// Skip this duplicate block (and any trailing blank line)
+			if i < len(lines) && strings.TrimSpace(lines[i]) == "" {
+				i++
+			}
+			continue
+		}
+
+		seen[sig] = true
+		// Keep the block
+		result = append(result, lines[blockStart:i]...)
+	}
+
+	return strings.Join(result, "\n")
 }

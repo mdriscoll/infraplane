@@ -741,6 +741,71 @@ func (h *Handlers) DeployStreamReconnect(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// ApproveDeployment resumes a deployment that is awaiting approval.
+// This is a GET endpoint because EventSource (SSE) only supports GET.
+// Connecting to this endpoint starts the apply phase and streams events.
+func (h *Handlers) ApproveDeployment(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid deployment ID")
+		return
+	}
+
+	// Verify the deployment exists and is awaiting approval
+	d, err := h.deployments.GetStatus(r.Context(), id)
+	if err != nil {
+		handleServiceError(w, err)
+		return
+	}
+	if d.Status != domain.DeploymentAwaitingApproval {
+		writeError(w, http.StatusConflict, fmt.Sprintf("deployment is %s, not awaiting_approval", d.Status))
+		return
+	}
+
+	// SSE requires http.Flusher
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	// SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	events := make(chan domain.DeploymentEvent, 32)
+
+	// Resume deployment in background goroutine
+	go h.deployments.Resume(r.Context(), id, h.infra, events)
+
+	// Stream events to client
+	for event := range events {
+		data, _ := json.Marshal(event)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+}
+
+// RejectDeployment cancels a deployment that is awaiting approval.
+func (h *Handlers) RejectDeployment(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid deployment ID")
+		return
+	}
+
+	if err := h.deployments.Reject(r.Context(), id); err != nil {
+		handleServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
+}
+
 // --- Terraform HCL Handler ---
 
 func (h *Handlers) GenerateTerraformHCL(w http.ResponseWriter, r *http.Request) {

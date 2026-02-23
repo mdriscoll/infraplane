@@ -291,6 +291,20 @@ func (r *DeploymentRepo) Update(_ context.Context, d domain.Deployment) error {
 	return nil
 }
 
+func (r *DeploymentRepo) FailOrphaned(_ context.Context) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for id, d := range r.deployments {
+		if d.Status == domain.DeploymentInProgress || d.Status == domain.DeploymentPending || d.Status == domain.DeploymentAwaitingApproval {
+			d.Status = domain.DeploymentFailed
+			r.deployments[id] = d
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (r *DeploymentRepo) GetLatestByApplicationID(_ context.Context, appID uuid.UUID) (domain.Deployment, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

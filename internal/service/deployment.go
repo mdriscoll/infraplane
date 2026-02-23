@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -109,9 +110,11 @@ func (s *DeploymentService) MarkFailed(ctx context.Context, id uuid.UUID) (domai
 	return d, nil
 }
 
-// Execute runs a deployment end-to-end: generates Terraform, validates credentials, and applies.
+// Execute runs phase 1 of a deployment: generates Terraform and pauses for approval.
 // It sends DeploymentEvent values to the events channel and closes it when done.
 // Events are also stored in the event store for reconnection by late-joining clients.
+// After HCL generation, the deployment enters "awaiting_approval" status and the
+// stream closes. Use Resume() after user approval to run the apply phase.
 func (s *DeploymentService) Execute(
 	ctx context.Context,
 	deploymentID uuid.UUID,
@@ -119,7 +122,6 @@ func (s *DeploymentService) Execute(
 	events chan<- domain.DeploymentEvent,
 ) {
 	defer close(events)
-	defer s.eventStore.MarkComplete(deploymentID)
 
 	emit := func(step domain.DeploymentStep, msg string, status domain.DeploymentStatus, detail string) {
 		event := domain.DeploymentEvent{
@@ -142,12 +144,14 @@ func (s *DeploymentService) Execute(
 	d, err := s.deployments.GetByID(ctx, deploymentID)
 	if err != nil {
 		emit(domain.StepFailed, "Deployment not found: "+err.Error(), domain.DeploymentFailed, "")
+		s.eventStore.MarkComplete(deploymentID)
 		return
 	}
 
 	// Guard: only execute pending deployments
 	if d.Status != domain.DeploymentPending {
 		emit(domain.StepFailed, fmt.Sprintf("Deployment is %s, not pending", d.Status), d.Status, "")
+		s.eventStore.MarkComplete(deploymentID)
 		return
 	}
 
@@ -158,25 +162,95 @@ func (s *DeploymentService) Execute(
 
 	if ctx.Err() != nil {
 		s.failDeploy(ctx, &d)
+		s.eventStore.MarkComplete(deploymentID)
 		return
 	}
 
-	// 3. Generate Terraform
+	// 3. Generate Terraform with per-resource breakdown
 	emit(domain.StepGeneratingTerraform, "Generating Terraform configuration...", domain.DeploymentInProgress, "")
 
-	hcl, err := infra.GenerateTerraform(ctx, d.ApplicationID, d.DeployTarget)
+	hcl, resourceHCLs, err := infra.GenerateTerraformWithResources(ctx, d.ApplicationID, d.DeployTarget)
 	if err != nil {
 		s.failDeploy(ctx, &d)
 		emit(domain.StepFailed, "Terraform generation failed: "+err.Error(), domain.DeploymentFailed, "")
+		s.eventStore.MarkComplete(deploymentID)
 		return
+	}
+
+	// Emit per-resource HCL events for the review UI
+	for _, rh := range resourceHCLs {
+		detailJSON, _ := json.Marshal(rh)
+		emit(domain.StepGeneratingTerraform,
+			fmt.Sprintf("Generated HCL for %s (%s)", rh.ResourceName, rh.ServiceName),
+			domain.DeploymentInProgress, string(detailJSON))
 	}
 
 	lineCount := len(hcl) / 40 // rough line estimate
 	emit(domain.StepGeneratingTerraform,
 		fmt.Sprintf("Terraform configuration generated (%d chars, ~%d lines).", len(hcl), lineCount),
-		domain.DeploymentInProgress, hcl)
+		domain.DeploymentInProgress, "")
 
-	// 4. Validate Credentials
+	// 4. Pause for user review/approval
+	d.Status = domain.DeploymentAwaitingApproval
+	d.TerraformPlan = hcl
+	_ = s.deployments.Update(ctx, d)
+
+	emit(domain.StepAwaitingApproval,
+		"Terraform review ready. Approve to apply or reject to cancel.",
+		domain.DeploymentAwaitingApproval, "")
+
+	// Mark the event store as paused (not complete) so reconnecting clients
+	// see the stored events and know the deployment is waiting for approval.
+	s.eventStore.MarkPaused(deploymentID)
+}
+
+// Resume runs phase 2 of a deployment after user approval: validates credentials and applies Terraform.
+// It sends DeploymentEvent values to the events channel and closes it when done.
+func (s *DeploymentService) Resume(
+	ctx context.Context,
+	deploymentID uuid.UUID,
+	infra *InfraService,
+	events chan<- domain.DeploymentEvent,
+) {
+	defer close(events)
+	defer s.eventStore.MarkComplete(deploymentID)
+
+	// Unpause the event store so new subscribers get live events
+	s.eventStore.MarkActive(deploymentID)
+
+	emit := func(step domain.DeploymentStep, msg string, status domain.DeploymentStatus, detail string) {
+		event := domain.DeploymentEvent{
+			Step:      step,
+			Message:   msg,
+			Timestamp: time.Now().UTC(),
+			Status:    status,
+			Detail:    detail,
+		}
+		s.eventStore.Append(deploymentID, event)
+		select {
+		case events <- event:
+		case <-ctx.Done():
+		}
+	}
+
+	d, err := s.deployments.GetByID(ctx, deploymentID)
+	if err != nil {
+		emit(domain.StepFailed, "Deployment not found: "+err.Error(), domain.DeploymentFailed, "")
+		return
+	}
+
+	if d.Status != domain.DeploymentAwaitingApproval {
+		emit(domain.StepFailed, fmt.Sprintf("Deployment is %s, not awaiting_approval", d.Status), d.Status, "")
+		return
+	}
+
+	// Mark in_progress for the apply phase
+	d.Status = domain.DeploymentInProgress
+	_ = s.deployments.Update(ctx, d)
+
+	hcl := d.TerraformPlan // Stored from phase 1
+
+	// 1. Validate Credentials
 	emit(domain.StepValidatingCredentials, "Validating cloud credentials...", domain.DeploymentInProgress, "")
 
 	app, appErr := infra.Apps().GetByID(ctx, d.ApplicationID)
@@ -201,10 +275,10 @@ func (s *DeploymentService) Execute(
 
 	emit(domain.StepValidatingCredentials, "Credentials validated successfully.", domain.DeploymentInProgress, "")
 
-	// 5. Validate Terraform
+	// 2. Validate Terraform
 	emit(domain.StepValidating, "Configuration validated.", domain.DeploymentInProgress, "")
 
-	// 6. Apply — stream real terraform output
+	// 3. Apply — stream real terraform output
 	emit(domain.StepApplying, "Running terraform init/plan/apply...", domain.DeploymentInProgress, "")
 
 	lineCallback := func(line string) {
@@ -220,16 +294,45 @@ func (s *DeploymentService) Execute(
 
 	emit(domain.StepApplying, "Apply complete! Resources created.", domain.DeploymentInProgress, "")
 
-	// 7. Mark succeeded
+	// 4. Mark succeeded
 	now := time.Now().UTC()
 	d.Status = domain.DeploymentSucceeded
 	d.CompletedAt = &now
-	d.TerraformPlan = hcl
 	if err := s.deployments.Update(ctx, d); err != nil {
 		log.Printf("[deploy] failed to update deployment status: %v", err)
 	}
 
 	emit(domain.StepComplete, "Deployment succeeded.", domain.DeploymentSucceeded, planOutput)
+}
+
+// Reject cancels a deployment that is awaiting approval.
+func (s *DeploymentService) Reject(ctx context.Context, deploymentID uuid.UUID) error {
+	d, err := s.deployments.GetByID(ctx, deploymentID)
+	if err != nil {
+		return err
+	}
+	if d.Status != domain.DeploymentAwaitingApproval {
+		return fmt.Errorf("deployment is %s, not awaiting_approval", d.Status)
+	}
+
+	now := time.Now().UTC()
+	d.Status = domain.DeploymentFailed
+	d.CompletedAt = &now
+	if err := s.deployments.Update(ctx, d); err != nil {
+		return fmt.Errorf("update deployment: %w", err)
+	}
+
+	// Emit a rejection event and mark complete
+	event := domain.DeploymentEvent{
+		Step:      domain.StepFailed,
+		Message:   "Deployment rejected by user.",
+		Timestamp: now,
+		Status:    domain.DeploymentFailed,
+	}
+	s.eventStore.Append(deploymentID, event)
+	s.eventStore.MarkComplete(deploymentID)
+
+	return nil
 }
 
 func (s *DeploymentService) failDeploy(ctx context.Context, d *domain.Deployment) {

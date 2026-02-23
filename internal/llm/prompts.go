@@ -343,16 +343,23 @@ Respond with ONLY a JSON object (no markdown fences, no explanation):
 
 The "hcl" field should contain valid, production-ready Terraform HCL that includes:
 - The main resource block with all necessary configuration
-- Any required data sources or supporting resources (e.g. IAM roles, security groups)
-- Sensible variable declarations for configurable values
+- Any required supporting resources specific to THIS resource (e.g. IAM roles, security groups)
+- Variable declarations ONLY for values unique to this resource (e.g. database name, instance size)
 - Tags including Name and Environment
+
+IMPORTANT — the following are provided by the assembly framework and must NOT be included in your output:
+- Do NOT declare variable "project_id", variable "region", or variable "environment" — reference them as var.project_id, var.region, var.environment
+- Do NOT include shared networking resources (VPC, subnets, firewalls) — assume they exist and reference them via data sources or var references
+- Do NOT include provider or terraform blocks
+- Do NOT include output blocks for common values (service_url, service_account_email) — only include outputs unique to this resource
 
 Guidelines:
 - Use the latest Terraform provider syntax
 - Include comments explaining key configuration choices
-- Use variables for values that should be configurable
+- Use variables for values that should be configurable (but NOT the common ones listed above)
 - Follow Terraform best practices for the target provider
 - Keep it focused on this single resource — do not include provider blocks
+- Reference shared infrastructure (VPC, subnets) rather than creating them
 - If compliance requirements are provided, you MUST satisfy every listed rule. Add a comment referencing the rule ID next to each compliance-related attribute (e.g. # CIS 6.4: Require SSL connections)`
 
 func buildTerraformHCLPrompt(resource domain.Resource, provider domain.CloudProvider, complianceContext string) string {

@@ -2,10 +2,10 @@
 
 **Describe your app. Get a cloud.**
 
-Infraplane is a cloud infrastructure platform that turns natural language into production-ready infrastructure. Point it at your codebase, pick AWS or GCP, and get a complete hosting plan — with Terraform configs, cost estimates, and a full resource inventory — in under a minute.
+Infraplane is a cloud infrastructure platform that turns natural language into production-ready infrastructure. Point it at your codebase, pick AWS or GCP, and get a complete hosting plan — with Terraform configs, cost estimates, compliance enforcement, and one-click deployment — in under a minute.
 
 It works two ways:
-- **Web dashboard** — a guided onboarding wizard and full management UI
+- **Web dashboard** — a guided onboarding wizard and full management UI with deploy, monitor, and review workflows
 - **Claude Code + MCP** — infrastructure generation happens in real-time as you build
 
 ---
@@ -18,6 +18,7 @@ It works two ways:
 3. Select your project folder
 4. Wait ~60 seconds
 5. Get: detected resources, hosting plan, cost estimate, and per-resource Terraform HCL
+6. Click Deploy — review the generated Terraform — approve and apply
 ```
 
 ---
@@ -43,7 +44,8 @@ When you register an application, Infraplane:
 3. **Creates** cloud-agnostic resources — a `database`, a `cache`, a `queue` — independent of any provider
 4. **Maps** each resource to concrete cloud services: RDS vs. Cloud SQL, ElastiCache vs. Memorystore
 5. **Generates** a hosting plan with architecture recommendations and monthly cost estimates
-6. **Produces** production-ready Terraform HCL for every resource, on demand
+6. **Produces** production-ready Terraform HCL for every resource, with automatic deduplication
+7. **Deploys** with a two-phase review flow: generate Terraform → review per-resource HCL → approve and apply
 
 ---
 
@@ -53,10 +55,13 @@ When you register an application, Infraplane:
 A 4-step guided flow: pick a provider → browse your code → wait for analysis → get your full hosting plan with resources, costs, and Terraform configs.
 
 ### Codebase Analysis
-The analyzer extracts 16+ infrastructure file types from your project and feeds them to the LLM for intelligent resource detection. No manual tagging required.
+The analyzer extracts 16+ infrastructure file types from your project and feeds them to the LLM for intelligent resource detection. No manual tagging required. Analysis history is tracked per application with full run logs.
+
+### Two-Phase Deploy with Terraform Review
+Deployments pause after Terraform generation so you can review before applying. The UI shows expandable per-resource HCL blocks — one for each cloud resource — with Approve & Apply or Reject buttons. The deploy pipeline streams real-time SSE events through each step: initialize → generate Terraform → review → validate credentials → apply.
 
 ### Per-Resource Terraform Generation
-Select any resource from your plan and generate production-ready Terraform HCL for your chosen provider. Copy to clipboard and deploy.
+Select any resource from your plan and generate production-ready Terraform HCL for your chosen provider, with compliance rules baked in. HCL is deduplicated at assembly time so shared variables and infrastructure blocks don't collide across resources.
 
 ### Live Resource Discovery
 Discover what's already running in your cloud account. Infraplane generates targeted CLI commands (`gcloud`, `aws`), executes them in a secure sandbox, and maps the results back to your application. Also supports GCP Cloud Asset Inventory for comprehensive project-wide scans.
@@ -67,8 +72,17 @@ Visualize your application's infrastructure as an interactive directed graph —
 ### Hosting Plans & Cost Estimates
 LLM-generated architecture recommendations with monthly cost breakdowns by resource category (compute, database, storage, networking, etc.).
 
+### Compliance Frameworks
+Apply compliance frameworks (SOC 2, HIPAA, PCI-DSS, CIS) to your application. The LLM receives framework-specific rules when generating Terraform HCL and enforces them with inline comments referencing each rule.
+
 ### Migration Planning
 Generate a step-by-step plan to move your application between AWS and GCP, including service mappings, data migration strategies, and new Terraform configurations.
+
+### GCP Credential Management
+Upload GCP service account keys directly in the UI. Infraplane validates credentials, auto-detects the project ID, and lists available projects.
+
+### Deploy Log Reconnection
+Navigate away during a deploy and come back — the UI reconnects to the SSE stream and replays all events from where you left off. Works for both active streams and completed deployments.
 
 ### MCP Integration
 All features are available as MCP tools for Claude Code. Infraplane can run as an MCP server over stdio, so Claude Code can create resources, generate plans, and discover infrastructure in real-time as you build.
@@ -88,14 +102,14 @@ All features are available as MCP tools for Claude Code. Infraplane can run as a
 │                                                               │
 │   ┌────────────┐   ┌────────────┐   ┌──────────────────────┐ │
 │   │ MCP Server │   │  REST API  │   │    LLM Engine        │ │
-│   │ (11 tools) │   │ (18 endpts)│   │ (Claude Sonnet 4.5)  │ │
+│   │ (12 tools) │   │(35 endpts) │   │ (Claude Sonnet 4.5)  │ │
 │   └──────┬─────┘   └──────┬─────┘   └──────────┬───────────┘ │
 │          │                │                     │             │
 │          └────────────────┼─────────────────────┘             │
 │                           │                                   │
 │                  ┌────────▼────────┐                          │
 │                  │  Service Layer  │                          │
-│                  │  (6 services)   │                          │
+│                  │  (7 services)   │                          │
 │                  └────────┬────────┘                          │
 │                           │                                   │
 │          ┌────────────────┼────────────────┐                  │
@@ -108,6 +122,7 @@ All features are available as MCP tools for Claude Code. Infraplane can run as a
 │                                                               │
 │   ┌──────────────────────────────────────────────────────┐   │
 │   │  Provider Adapters: AWS │ GCP │ Terraform Generator  │   │
+│   │                         (with HCL deduplication)      │   │
 │   └──────────────────────────────────────────────────────┘   │
 └───────────────────────────────────────────────────────────────┘
 
@@ -117,10 +132,10 @@ All features are available as MCP tools for Claude Code. Infraplane can run as a
 │  │ Onboard │ │  Apps   │ │ App      │ │ Deploy │ │Migration│ │
 │  │ Wizard  │ │  List   │ │ Detail   │ │ Board  │ │ Planner │ │
 │  └─────────┘ └────────┘ └──────────┘ └────────┘ └─────────┘ │
-│  ┌──────────────┐ ┌───────────────┐ ┌────────────────────┐   │
-│  │ InfraGraph   │ │ LiveResources │ │ Terraform Viewer   │   │
-│  │ (React Flow) │ │ Table         │ │ (per-resource HCL) │   │
-│  └──────────────┘ └───────────────┘ └────────────────────┘   │
+│  ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌────────────────┐  │
+│  │InfraGraph│ │LiveResources│ │ Deploy  │ │   Terraform    │  │
+│  │(ReactFlow)│ │  Table    │ │  Log    │ │   Review       │  │
+│  └──────────┘ └───────────┘ └──────────┘ └────────────────┘  │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -221,16 +236,24 @@ All endpoints are prefixed with `/api`.
 | `POST` | `/applications/{name}/graph` | Generate infrastructure graph |
 | `GET` | `/applications/{name}/graph` | Get latest graph |
 | `POST` | `/applications/{name}/live-resources` | Discover live resources |
-| `POST` | `/applications/{name}/deploy` | Deploy application |
+| `POST` | `/applications/{name}/deploy` | Create deployment |
 | `GET` | `/applications/{name}/deployments` | List deployments |
 | `GET` | `/deployments/{id}` | Get deployment status |
+| `GET` | `/deployments/{id}/stream` | Stream deployment events (SSE) |
+| `GET` | `/deployments/{id}/approve` | Approve and apply deployment (SSE) |
+| `POST` | `/deployments/{id}/reject` | Reject deployment |
+| `POST` | `/gcp/credentials` | Upload GCP credentials |
+| `GET` | `/gcp/credentials/status` | Check GCP credential status |
+| `GET` | `/gcp/projects` | List GCP projects |
+| `POST` | `/applications/{name}/validate-target` | Validate deploy target credentials |
+| `GET` | `/applications/{name}/analysis-runs` | List analysis run history |
 | `GET` | `/health` | Health check |
 
 ---
 
 ## MCP Tools
 
-11 tools available when running as an MCP server:
+12 tools available when running as an MCP server:
 
 | Tool | Description | LLM |
 |------|-------------|:---:|
@@ -245,6 +268,7 @@ All endpoints are prefixed with `/api`.
 | `get_deployment_status` | Check deployment status | |
 | `generate_graph` | Generate infrastructure topology graph | ✦ |
 | `discover_live_resources` | Discover running cloud resources | ✦ |
+| `generate_terraform_hcl` | Generate Terraform HCL for a resource | ✦ |
 
 ✦ = LLM-powered operation
 
@@ -268,7 +292,7 @@ Resource{
 }
 ```
 
-Each resource maps to concrete services on both providers. Terraform HCL is generated on demand per resource.
+Each resource maps to concrete services on both providers. Terraform HCL is generated on demand per resource and deduplicated when assembled into a single configuration.
 
 ### Supported Resource Kinds
 
@@ -288,10 +312,45 @@ Each resource maps to concrete services on both providers. Terraform HCL is gene
 
 ```
 Application ──┬── Resources ── ProviderMappings (AWS + GCP)
-              ├── Deployments (git commit, status, Terraform plan)
+              ├── Deployments (two-phase: generate → review → apply)
               ├── InfrastructurePlans (hosting or migration, cost estimates)
-              └── InfraGraphs (topology: nodes + edges)
+              ├── InfraGraphs (topology: nodes + edges)
+              └── AnalysisRuns (codebase scan history)
 ```
+
+---
+
+## Deployment Pipeline
+
+Infraplane uses a two-phase deployment model with a human review gate:
+
+```
+Phase 1 (automatic):
+  Initialize workspace
+  → Generate Terraform HCL for each resource (LLM-powered)
+  → Deduplicate shared blocks (variables, VPCs, outputs)
+  → Pause at "awaiting_approval" status
+
+  ┌─────────────────────────────────┐
+  │  Terraform Review UI            │
+  │  ┌───────────────────────────┐  │
+  │  │ ▶ database: user-db       │  │
+  │  │   (Cloud SQL — 42 lines)  │  │
+  │  ├───────────────────────────┤  │
+  │  │ ▶ cache: session-cache    │  │
+  │  │   (Memorystore — 28 lines)│  │
+  │  └───────────────────────────┘  │
+  │  [Approve & Apply] [Reject]     │
+  └─────────────────────────────────┘
+
+Phase 2 (after approval):
+  Validate cloud credentials
+  → Terraform init + apply
+  → Stream apply output in real-time
+  → Mark succeeded or failed
+```
+
+Deployments that are left in `awaiting_approval` are automatically cleaned up on server restart.
 
 ---
 
@@ -304,7 +363,7 @@ infraplane/
 │   ├── domain/                         # Core models (zero external deps)
 │   │   ├── application.go              # Application entity + status enum
 │   │   ├── resource.go                 # Cloud-agnostic resource model
-│   │   ├── deployment.go               # Deployment tracking
+│   │   ├── deployment.go               # Deployment tracking + two-phase status
 │   │   ├── plan.go                     # Infrastructure plans + cost estimates
 │   │   ├── graph.go                    # Topology graph (nodes + edges)
 │   │   ├── live_resource.go            # Live cloud resource tracking
@@ -315,30 +374,33 @@ infraplane/
 │   │   ├── client.go                   # Client interface
 │   │   ├── prompts.go                  # Prompt templates (7+ tasks)
 │   │   └── mock.go                     # Mock client for tests
-│   ├── service/                        # Business logic (6 services)
+│   ├── service/                        # Business logic (7 services)
 │   │   ├── application.go              # CRUD + auto-detect + onboarding
 │   │   ├── resource.go                 # LLM-powered resource management
 │   │   ├── planner.go                  # Hosting + migration planning
 │   │   ├── graph.go                    # Topology graph generation
 │   │   ├── discovery.go                # Live resource discovery
-│   │   └── deployment.go               # Deployment orchestration
+│   │   ├── deployment.go               # Two-phase deploy (Execute → Review → Resume)
+│   │   ├── infra.go                    # Terraform generation + provider orchestration
+│   │   └── eventstore.go              # In-memory SSE event store with pause/resume
 │   ├── repository/                     # Data access layer
 │   │   ├── interfaces.go               # Repository interfaces
 │   │   ├── postgres/                   # PostgreSQL implementations (pgx v5)
 │   │   └── mock/                       # In-memory mocks for unit tests
 │   ├── analyzer/                       # Codebase analyzer (16+ file types)
 │   ├── executor/                       # Secure CLI executor (read-only)
+│   ├── compliance/                     # Compliance framework registry
 │   ├── cloud/gcp/                      # GCP Cloud Asset Inventory
 │   ├── provider/                       # Cloud provider adapters
 │   │   ├── aws/                        # AWS adapter
 │   │   ├── gcp/                        # GCP adapter
-│   │   └── terraform/                  # Terraform HCL generator
-│   ├── mcp/                            # MCP server (11 tools)
-│   └── api/                            # REST API (18 endpoints, chi router)
-├── migrations/                         # 6 PostgreSQL migrations
+│   │   └── terraform/                  # Terraform HCL generator + deduplication
+│   ├── mcp/                            # MCP server (12 tools)
+│   └── api/                            # REST API (35 endpoints, chi router)
+├── migrations/                         # 11 PostgreSQL migrations
 ├── web/                                # React + TypeScript frontend
 │   ├── src/pages/                      # 5 pages
-│   ├── src/components/                 # 6 components
+│   ├── src/components/                 # 11 components
 │   ├── src/api/client.ts               # API client
 │   ├── src/hooks/useApi.ts             # TanStack Query hooks
 │   └── src/lib/directoryPicker.ts      # File System Access API
@@ -388,9 +450,9 @@ make test-all          # Everything
 
 ### Database
 
-6 migrations manage the schema:
+11 migrations manage the schema:
 
-| Migration | Table |
+| Migration | Table / Change |
 |-----------|-------|
 | 001 | `applications` |
 | 002 | `resources` (JSONB specs + provider mappings) |
@@ -398,6 +460,11 @@ make test-all          # Everything
 | 004 | `plans` (hosting/migration + cost estimates) |
 | 005 | `source_path` column on applications |
 | 006 | `graphs` (topology nodes + edges) |
+| 007 | Cascade deletes from application → resources |
+| 008 | `compliance_frameworks` column on applications |
+| 009 | `plan_id` column on deployments |
+| 010 | `deploy_target` JSONB column on deployments |
+| 011 | `analysis_runs` table |
 
 Key decisions: UUID primary keys, JSONB for flexible schemas, cascading deletes from application → resources, indexed foreign keys.
 

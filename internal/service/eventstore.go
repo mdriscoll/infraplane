@@ -14,6 +14,7 @@ type deploymentEventStore struct {
 	events      map[uuid.UUID][]domain.DeploymentEvent
 	subscribers map[uuid.UUID][]chan domain.DeploymentEvent
 	completed   map[uuid.UUID]bool
+	paused      map[uuid.UUID]bool
 }
 
 func newDeploymentEventStore() *deploymentEventStore {
@@ -21,6 +22,7 @@ func newDeploymentEventStore() *deploymentEventStore {
 		events:      make(map[uuid.UUID][]domain.DeploymentEvent),
 		subscribers: make(map[uuid.UUID][]chan domain.DeploymentEvent),
 		completed:   make(map[uuid.UUID]bool),
+		paused:      make(map[uuid.UUID]bool),
 	}
 }
 
@@ -61,6 +63,36 @@ func (s *deploymentEventStore) IsComplete(deploymentID uuid.UUID) bool {
 	return s.completed[deploymentID]
 }
 
+// MarkPaused marks a deployment's event stream as paused (awaiting approval).
+// Closes all subscriber channels but does NOT mark as completed so reconnecting
+// clients know the deployment is not finished.
+func (s *deploymentEventStore) MarkPaused(deploymentID uuid.UUID) {
+	s.mu.Lock()
+	s.paused[deploymentID] = true
+	subs := s.subscribers[deploymentID]
+	delete(s.subscribers, deploymentID)
+	s.mu.Unlock()
+
+	for _, ch := range subs {
+		close(ch)
+	}
+}
+
+// MarkActive clears the paused flag so new subscribers can receive live events
+// during the resume/apply phase.
+func (s *deploymentEventStore) MarkActive(deploymentID uuid.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.paused, deploymentID)
+}
+
+// IsPaused returns true if the deployment is paused (awaiting approval).
+func (s *deploymentEventStore) IsPaused(deploymentID uuid.UUID) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.paused[deploymentID]
+}
+
 // GetEvents returns all stored events for a deployment.
 func (s *deploymentEventStore) GetEvents(deploymentID uuid.UUID) []domain.DeploymentEvent {
 	s.mu.RLock()
@@ -74,6 +106,8 @@ func (s *deploymentEventStore) GetEvents(deploymentID uuid.UUID) []domain.Deploy
 // Subscribe returns existing events and a channel for future events.
 // The channel will be closed when the deployment completes.
 // Returns (storedEvents, liveChan, alreadyComplete).
+// When paused (awaiting approval): returns stored events, nil channel, false.
+// This tells the caller that events exist but the deployment is not complete.
 func (s *deploymentEventStore) Subscribe(deploymentID uuid.UUID) ([]domain.DeploymentEvent, chan domain.DeploymentEvent, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -84,6 +118,12 @@ func (s *deploymentEventStore) Subscribe(deploymentID uuid.UUID) ([]domain.Deplo
 
 	if s.completed[deploymentID] {
 		return stored, nil, true
+	}
+
+	// If paused (awaiting approval), return stored events but no live channel.
+	// The caller sees: stored events, nil channel, NOT complete = paused state.
+	if s.paused[deploymentID] {
+		return stored, nil, false
 	}
 
 	// Create subscriber channel

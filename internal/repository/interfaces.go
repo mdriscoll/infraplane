@@ -42,6 +42,9 @@ type DeploymentRepo interface {
 	ListByApplicationID(ctx context.Context, appID uuid.UUID) ([]domain.Deployment, error)
 	Update(ctx context.Context, d domain.Deployment) error
 	GetLatestByApplicationID(ctx context.Context, appID uuid.UUID) (domain.Deployment, error)
+	// FailOrphaned marks any in_progress or pending deployments as failed.
+	// Called on server startup to clean up deployments orphaned by a previous crash/restart.
+	FailOrphaned(ctx context.Context) (int, error)
 }
 
 // PlanRepo defines data access for infrastructure plans.

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as api from '../api/client'
-import type { DeploymentEvent, DeployTarget } from '../api/client'
+import type { DeploymentEvent, DeployTarget, ResourceHCLDetail } from '../api/client'
 
 // --- Application Hooks ---
 
@@ -282,10 +282,30 @@ export function useDeleteGCPCredentials() {
 
 // --- Deployment Stream Hook ---
 
+// Helper to extract ResourceHCLDetail items from generating_terraform events
+function extractResourceHCLs(events: DeploymentEvent[]): ResourceHCLDetail[] {
+  const results: ResourceHCLDetail[] = []
+  for (const ev of events) {
+    if (ev.step === 'generating_terraform' && ev.detail) {
+      try {
+        const parsed = JSON.parse(ev.detail)
+        if (parsed.resource_id && parsed.hcl) {
+          results.push(parsed as ResourceHCLDetail)
+        }
+      } catch {
+        // Not a resource HCL event (could be the full assembled HCL), skip
+      }
+    }
+  }
+  return results
+}
+
 export function useDeploymentStream(deploymentId: string | null) {
   const [events, setEvents] = useState<DeploymentEvent[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
+  const [isAwaitingApproval, setIsAwaitingApproval] = useState(false)
+  const [resourceHCLs, setResourceHCLs] = useState<ResourceHCLDetail[]>([])
   const [finalStatus, setFinalStatus] = useState<'succeeded' | 'failed' | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
 
@@ -293,6 +313,8 @@ export function useDeploymentStream(deploymentId: string | null) {
     setEvents([])
     setIsStreaming(false)
     setIsComplete(false)
+    setIsAwaitingApproval(false)
+    setResourceHCLs([])
     setFinalStatus(null)
   }, [])
 
@@ -309,6 +331,25 @@ export function useDeploymentStream(deploymentId: string | null) {
       const event: DeploymentEvent = JSON.parse(e.data)
       setEvents((prev) => [...prev, event])
 
+      // Collect per-resource HCL from generating_terraform events
+      if (event.step === 'generating_terraform' && event.detail) {
+        try {
+          const parsed = JSON.parse(event.detail)
+          if (parsed.resource_id && parsed.hcl) {
+            setResourceHCLs((prev) => [...prev, parsed as ResourceHCLDetail])
+          }
+        } catch {
+          // Not a resource HCL event, ignore
+        }
+      }
+
+      // Detect awaiting_approval — stream will close after this
+      if (event.step === 'awaiting_approval') {
+        setIsAwaitingApproval(true)
+        setIsStreaming(false)
+        es.close()
+      }
+
       if (event.step === 'complete' || event.step === 'failed') {
         setIsComplete(true)
         setIsStreaming(false)
@@ -328,7 +369,7 @@ export function useDeploymentStream(deploymentId: string | null) {
     }
   }, [deploymentId, reset])
 
-  return { events, isStreaming, isComplete, finalStatus, reset }
+  return { events, isStreaming, isComplete, isAwaitingApproval, resourceHCLs, finalStatus, reset }
 }
 
 // --- Deployment Reconnect Stream Hook ---
@@ -338,6 +379,8 @@ export function useDeploymentReconnect(deploymentId: string | null) {
   const [events, setEvents] = useState<DeploymentEvent[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
+  const [isAwaitingApproval, setIsAwaitingApproval] = useState(false)
+  const [resourceHCLs, setResourceHCLs] = useState<ResourceHCLDetail[]>([])
   const [finalStatus, setFinalStatus] = useState<'succeeded' | 'failed' | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
 
@@ -349,6 +392,8 @@ export function useDeploymentReconnect(deploymentId: string | null) {
     setEvents([])
     setIsStreaming(false)
     setIsComplete(false)
+    setIsAwaitingApproval(false)
+    setResourceHCLs([])
     setFinalStatus(null)
   }, [])
 
@@ -365,6 +410,13 @@ export function useDeploymentReconnect(deploymentId: string | null) {
       const event: DeploymentEvent = JSON.parse(e.data)
       setEvents((prev) => [...prev, event])
 
+      // Detect awaiting_approval step
+      if (event.step === 'awaiting_approval') {
+        setIsAwaitingApproval(true)
+        setIsStreaming(false)
+        es.close()
+      }
+
       if (event.step === 'complete' || event.step === 'failed') {
         setIsComplete(true)
         setIsStreaming(false)
@@ -374,15 +426,18 @@ export function useDeploymentReconnect(deploymentId: string | null) {
     }
 
     es.onerror = () => {
-      // Connection closed — could mean deployment completed (SSE closed normally)
-      // or a network error. Check if we got a final event.
+      // Connection closed — could mean deployment completed (SSE closed normally),
+      // is paused (awaiting approval), or a network error.
       setIsStreaming(false)
       es.close()
-      // If we have events but no explicit complete/failed, mark as complete
       setEvents((prev) => {
         if (prev.length > 0) {
           const last = prev[prev.length - 1]
-          if (last.step !== 'complete' && last.step !== 'failed') {
+          if (last.step === 'awaiting_approval') {
+            // Deployment is paused for review
+            setIsAwaitingApproval(true)
+            setResourceHCLs(extractResourceHCLs(prev))
+          } else if (last.step !== 'complete' && last.step !== 'failed') {
             setIsComplete(true)
             setFinalStatus(last.status === 'succeeded' ? 'succeeded' : last.status === 'failed' ? 'failed' : null)
           }
@@ -397,5 +452,71 @@ export function useDeploymentReconnect(deploymentId: string | null) {
     }
   }, [deploymentId, reset])
 
-  return { events, isStreaming, isComplete, finalStatus, reset }
+  return { events, isStreaming, isComplete, isAwaitingApproval, resourceHCLs, finalStatus, reset }
+}
+
+// --- Deployment Approve Stream Hook ---
+// Connects to the approve SSE endpoint which starts the apply phase.
+export function useDeploymentApprove() {
+  const [events, setEvents] = useState<DeploymentEvent[]>([])
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [isComplete, setIsComplete] = useState(false)
+  const [finalStatus, setFinalStatus] = useState<'succeeded' | 'failed' | null>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
+
+  const approve = useCallback((deploymentId: string) => {
+    // Close any existing connection
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+    }
+
+    setEvents([])
+    setIsStreaming(true)
+    setIsComplete(false)
+    setFinalStatus(null)
+
+    const es = new EventSource(api.getDeploymentApproveStreamUrl(deploymentId))
+    eventSourceRef.current = es
+
+    es.onmessage = (e) => {
+      const event: DeploymentEvent = JSON.parse(e.data)
+      setEvents((prev) => [...prev, event])
+
+      if (event.step === 'complete' || event.step === 'failed') {
+        setIsComplete(true)
+        setIsStreaming(false)
+        setFinalStatus(event.status === 'succeeded' ? 'succeeded' : 'failed')
+        es.close()
+      }
+    }
+
+    es.onerror = () => {
+      setIsStreaming(false)
+      es.close()
+    }
+  }, [])
+
+  const reset = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+    }
+    setEvents([])
+    setIsStreaming(false)
+    setIsComplete(false)
+    setFinalStatus(null)
+  }, [])
+
+  return { events, isStreaming, isComplete, finalStatus, approve, reset }
+}
+
+// --- Deployment Reject Hook ---
+export function useRejectDeployment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.rejectDeployment,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deployments'] })
+    },
+  })
 }

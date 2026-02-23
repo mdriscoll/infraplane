@@ -3,6 +3,7 @@ import type { Deployment, InfrastructurePlan } from '../api/client'
 const statusStyles: Record<string, string> = {
   pending: 'bg-yellow-100 text-yellow-800',
   in_progress: 'bg-blue-100 text-blue-800',
+  awaiting_approval: 'bg-amber-100 text-amber-800',
   succeeded: 'bg-green-100 text-green-800',
   failed: 'bg-red-100 text-red-800',
 }
@@ -27,7 +28,7 @@ export default function DeploymentHistory({ deployments, plans, selectedDeployme
   }
 
   const isClickable = (d: Deployment) =>
-    onSelectDeployment && (d.status === 'in_progress' || d.status === 'succeeded' || d.status === 'failed')
+    onSelectDeployment && (d.status === 'in_progress' || d.status === 'awaiting_approval' || d.status === 'succeeded' || d.status === 'failed')
 
   return (
     <div className="overflow-hidden border border-gray-200 rounded-lg">
@@ -54,7 +55,7 @@ export default function DeploymentHistory({ deployments, plans, selectedDeployme
             >
               <td className="px-4 py-3">
                 <span className={`text-xs font-medium px-2 py-1 rounded-full ${statusStyles[d.status] || ''}`}>
-                  {d.status === 'in_progress' ? 'in progress' : d.status}
+                  {d.status === 'in_progress' ? 'in progress' : d.status === 'awaiting_approval' ? 'awaiting approval' : d.status}
                 </span>
               </td>
               <td className="px-4 py-3 text-sm text-gray-900 font-mono">{d.git_branch}</td>

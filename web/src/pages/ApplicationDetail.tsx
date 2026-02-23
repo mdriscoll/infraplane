@@ -5,6 +5,7 @@ import ResourceList from '../components/ResourceList'
 import LiveResourceTable from '../components/LiveResourceTable'
 import DeploymentHistory from '../components/DeploymentHistory'
 import DeployLog from '../components/DeployLog'
+import TerraformReview from '../components/TerraformReview'
 import PlanViewer from '../components/PlanViewer'
 import InfraGraphView from '../components/InfraGraphView'
 import Spinner from '../components/Spinner'
@@ -26,6 +27,8 @@ import {
   useComplianceFrameworks,
   useDeploymentStream,
   useDeploymentReconnect,
+  useDeploymentApprove,
+  useRejectDeployment,
   useValidateDeployTarget,
   useGCPProjects,
   useGCPCredentialStatus,
@@ -69,7 +72,14 @@ export default function ApplicationDetail() {
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
   const [expandedPlanIds, setExpandedPlanIds] = useState<Set<string>>(new Set())
   const [streamingDeployId, setStreamingDeployId] = useState<string | null>(null)
-  const { events: streamEvents, isStreaming, isComplete: streamComplete, finalStatus } = useDeploymentStream(streamingDeployId)
+  const {
+    events: streamEvents,
+    isStreaming,
+    isComplete: streamComplete,
+    isAwaitingApproval,
+    resourceHCLs,
+    finalStatus,
+  } = useDeploymentStream(streamingDeployId)
 
   // Reconnect to a previously started deployment (from history click)
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null)
@@ -77,9 +87,15 @@ export default function ApplicationDetail() {
     events: reconnectEvents,
     isStreaming: reconnectStreaming,
     isComplete: reconnectComplete,
+    isAwaitingApproval: reconnectAwaitingApproval,
+    resourceHCLs: reconnectResourceHCLs,
     finalStatus: reconnectFinalStatus,
     reset: reconnectReset,
   } = useDeploymentReconnect(selectedDeployment?.id ?? null)
+
+  // Approval / rejection hooks
+  const approvalStream = useDeploymentApprove()
+  const rejectMutation = useRejectDeployment()
 
   const handleSelectDeployment = (deployment: Deployment) => {
     if (selectedDeployment?.id === deployment.id) {
@@ -120,6 +136,13 @@ export default function ApplicationDetail() {
       queryClient.invalidateQueries({ queryKey: ['deployments', name] })
     }
   }, [streamComplete, name, queryClient])
+
+  // When approval stream completes, refresh deployment history
+  useEffect(() => {
+    if (approvalStream.isComplete && name) {
+      queryClient.invalidateQueries({ queryKey: ['deployments', name] })
+    }
+  }, [approvalStream.isComplete, name, queryClient])
 
   if (isLoading) return <div className="text-center py-12 text-gray-500">Loading...</div>
   if (error) return <div className="text-center py-12 text-red-500">Error: {error.message}</div>
@@ -759,14 +782,40 @@ export default function ApplicationDetail() {
 
           {/* Streaming Deploy Log (new deploy) */}
           {streamingDeployId && (
-            <section>
+            <section className="space-y-4">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Deployment Output</h2>
               <DeployLog
                 events={streamEvents}
                 isStreaming={isStreaming}
-                isComplete={streamComplete}
-                finalStatus={finalStatus}
+                isComplete={streamComplete && !isAwaitingApproval}
+                finalStatus={approvalStream.isComplete ? approvalStream.finalStatus : finalStatus}
               />
+
+              {/* Show review UI when awaiting approval */}
+              {isAwaitingApproval && !approvalStream.isStreaming && !approvalStream.isComplete && (
+                <TerraformReview
+                  resourceHCLs={resourceHCLs}
+                  onApprove={() => approvalStream.approve(streamingDeployId)}
+                  onReject={() => {
+                    rejectMutation.mutate(streamingDeployId, {
+                      onSuccess: () => {
+                        queryClient.invalidateQueries({ queryKey: ['deployments', name!] })
+                      },
+                    })
+                  }}
+                  isApproving={approvalStream.isStreaming}
+                />
+              )}
+
+              {/* Show apply-phase log after approval */}
+              {approvalStream.events.length > 0 && (
+                <DeployLog
+                  events={approvalStream.events}
+                  isStreaming={approvalStream.isStreaming}
+                  isComplete={approvalStream.isComplete}
+                  finalStatus={approvalStream.finalStatus}
+                />
+              )}
             </section>
           )}
 
@@ -793,7 +842,7 @@ export default function ApplicationDetail() {
 
           {/* Reconnected Deploy Log (from history click) */}
           {selectedDeployment && !streamingDeployId && (
-            <section>
+            <section className="space-y-4">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">
                 Deployment Log — {selectedDeployment.git_branch}
                 <span className="ml-2 text-sm font-normal text-gray-500">
@@ -803,9 +852,35 @@ export default function ApplicationDetail() {
               <DeployLog
                 events={reconnectEvents}
                 isStreaming={reconnectStreaming}
-                isComplete={reconnectComplete}
-                finalStatus={reconnectFinalStatus}
+                isComplete={reconnectComplete && !reconnectAwaitingApproval}
+                finalStatus={approvalStream.isComplete ? approvalStream.finalStatus : reconnectFinalStatus}
               />
+
+              {/* Show review UI for reconnected awaiting_approval deployments */}
+              {reconnectAwaitingApproval && !approvalStream.isStreaming && !approvalStream.isComplete && (
+                <TerraformReview
+                  resourceHCLs={reconnectResourceHCLs}
+                  onApprove={() => approvalStream.approve(selectedDeployment.id)}
+                  onReject={() => {
+                    rejectMutation.mutate(selectedDeployment.id, {
+                      onSuccess: () => {
+                        queryClient.invalidateQueries({ queryKey: ['deployments', name!] })
+                      },
+                    })
+                  }}
+                  isApproving={approvalStream.isStreaming}
+                />
+              )}
+
+              {/* Show apply-phase log after approval */}
+              {approvalStream.events.length > 0 && (
+                <DeployLog
+                  events={approvalStream.events}
+                  isStreaming={approvalStream.isStreaming}
+                  isComplete={approvalStream.isComplete}
+                  finalStatus={approvalStream.finalStatus}
+                />
+              )}
             </section>
           )}
         </div>

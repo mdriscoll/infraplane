@@ -10,10 +10,11 @@ import (
 type DeploymentStatus string
 
 const (
-	DeploymentPending    DeploymentStatus = "pending"
-	DeploymentInProgress DeploymentStatus = "in_progress"
-	DeploymentSucceeded  DeploymentStatus = "succeeded"
-	DeploymentFailed     DeploymentStatus = "failed"
+	DeploymentPending          DeploymentStatus = "pending"
+	DeploymentInProgress       DeploymentStatus = "in_progress"
+	DeploymentAwaitingApproval DeploymentStatus = "awaiting_approval"
+	DeploymentSucceeded        DeploymentStatus = "succeeded"
+	DeploymentFailed           DeploymentStatus = "failed"
 )
 
 // DeployTarget holds provider-specific deployment target configuration.
@@ -82,13 +83,14 @@ func NewDeployment(appID uuid.UUID, provider CloudProvider, gitCommit, gitBranch
 type DeploymentStep string
 
 const (
-	StepInitializing            DeploymentStep = "initializing"
-	StepGeneratingTerraform     DeploymentStep = "generating_terraform"
-	StepValidatingCredentials   DeploymentStep = "validating_credentials"
-	StepValidating              DeploymentStep = "validating"
-	StepApplying                DeploymentStep = "applying"
-	StepComplete                DeploymentStep = "complete"
-	StepFailed                  DeploymentStep = "failed"
+	StepInitializing          DeploymentStep = "initializing"
+	StepGeneratingTerraform   DeploymentStep = "generating_terraform"
+	StepAwaitingApproval      DeploymentStep = "awaiting_approval"
+	StepValidatingCredentials DeploymentStep = "validating_credentials"
+	StepValidating            DeploymentStep = "validating"
+	StepApplying              DeploymentStep = "applying"
+	StepComplete              DeploymentStep = "complete"
+	StepFailed                DeploymentStep = "failed"
 )
 
 // DeploymentEvent is a single log entry streamed to the client during deployment execution.

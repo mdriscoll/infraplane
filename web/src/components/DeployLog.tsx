@@ -12,12 +12,13 @@ interface DeployLogProps {
 const stepLabels: Record<string, string> = {
   initializing: 'Initializing',
   generating_terraform: 'Generating Terraform',
+  awaiting_approval: 'Review & Approve',
   validating_credentials: 'Validating Credentials',
   validating: 'Validating',
   applying: 'Applying',
 }
 
-const steps = ['initializing', 'generating_terraform', 'validating_credentials', 'validating', 'applying'] as const
+const steps = ['initializing', 'generating_terraform', 'awaiting_approval', 'validating_credentials', 'validating', 'applying'] as const
 
 export default function DeployLog({ events, isStreaming, isComplete, finalStatus }: DeployLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -44,20 +45,23 @@ export default function DeployLog({ events, isStreaming, isComplete, finalStatus
   return (
     <div className="space-y-4">
       {/* Step progress bar */}
-      <div className="flex gap-4">
+      <div className="flex gap-4 flex-wrap">
         {steps.map((step) => {
           const isDone = completedSteps.has(step)
           const isActive = currentStep === step && isStreaming
+          const isPaused = step === 'awaiting_approval' && currentStep === 'awaiting_approval' && !isStreaming
           return (
             <div key={step} className="flex items-center gap-1.5 text-xs">
               {isDone ? (
                 <span className="text-green-500">{'\u2713'}</span>
+              ) : isPaused ? (
+                <span className="text-amber-500">{'\u275A\u275A'}</span>
               ) : isActive ? (
                 <Spinner className="text-indigo-500" />
               ) : (
                 <span className="text-gray-300">{'\u25CB'}</span>
               )}
-              <span className={isDone ? 'text-green-700' : isActive ? 'text-indigo-700 font-medium' : 'text-gray-400'}>
+              <span className={isDone ? 'text-green-700' : isPaused ? 'text-amber-700 font-medium' : isActive ? 'text-indigo-700 font-medium' : 'text-gray-400'}>
                 {stepLabels[step]}
               </span>
             </div>
@@ -75,6 +79,7 @@ export default function DeployLog({ events, isStreaming, isComplete, finalStatus
             <span className={
               event.step === 'failed' ? 'text-red-400' :
               event.step === 'complete' ? 'text-green-400' :
+              event.step === 'awaiting_approval' ? 'text-amber-400' :
               'text-gray-200'
             }>
               {event.message}

@@ -84,6 +84,17 @@ func (r *DeploymentRepo) Update(ctx context.Context, d domain.Deployment) error 
 	return nil
 }
 
+func (r *DeploymentRepo) FailOrphaned(ctx context.Context) (int, error) {
+	result, err := r.pool.Exec(ctx,
+		`UPDATE deployments SET status = 'failed', completed_at = NOW()
+		 WHERE status IN ('in_progress', 'pending', 'awaiting_approval')`,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("fail orphaned deployments: %w", err)
+	}
+	return int(result.RowsAffected()), nil
+}
+
 func (r *DeploymentRepo) GetLatestByApplicationID(ctx context.Context, appID uuid.UUID) (domain.Deployment, error) {
 	var d domain.Deployment
 	err := r.pool.QueryRow(ctx,

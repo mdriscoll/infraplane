@@ -453,13 +453,13 @@ func TestDeployStream(t *testing.T) {
 		if !strings.Contains(body, "data: ") {
 			t.Error("expected SSE data events in response body")
 		}
-		if !strings.Contains(body, `"step":"complete"`) {
-			t.Errorf("expected complete step in response, got:\n%s", body)
+		if !strings.Contains(body, `"step":"awaiting_approval"`) {
+			t.Errorf("expected awaiting_approval step in response, got:\n%s", body)
 		}
 	})
 
 	t.Run("non-pending deployment returns 409", func(t *testing.T) {
-		// The deployment above is now succeeded, so streaming should fail
+		// The deployment above is now awaiting_approval, so streaming should fail
 		w := doRequest(router, "GET", "/api/deployments/"+d.ID.String()+"/stream", nil)
 		if w.Code != http.StatusConflict {
 			t.Errorf("status = %d, want %d; body = %s", w.Code, http.StatusConflict, w.Body.String())

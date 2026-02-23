@@ -98,6 +98,13 @@ func main() {
 		graphRepo := postgres.NewGraphRepo(pool)
 		analysisRunRepo := postgres.NewAnalysisRunRepo(pool)
 
+		// Clean up orphaned deployments from previous server crash/restart
+		if n, err := depRepo.FailOrphaned(context.Background()); err != nil {
+			log.Printf("WARNING: failed to clean up orphaned deployments: %v", err)
+		} else if n > 0 {
+			log.Printf("Cleaned up %d orphaned deployment(s) from previous run", n)
+		}
+
 		appSvc = service.NewApplicationService(appRepo, resRepo, analysisRunRepo, llmClient, complianceRegistry)
 		resSvc = service.NewResourceService(resRepo, appRepo, analysisRunRepo, llmClient, complianceRegistry)
 		planSvc = service.NewPlannerService(planRepo, appRepo, resRepo, llmClient, complianceRegistry)

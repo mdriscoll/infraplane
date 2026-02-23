@@ -64,7 +64,7 @@ export interface Deployment {
   provider: string
   git_commit: string
   git_branch: string
-  status: 'pending' | 'in_progress' | 'succeeded' | 'failed'
+  status: 'pending' | 'in_progress' | 'awaiting_approval' | 'succeeded' | 'failed'
   terraform_plan?: string
   deploy_target?: DeployTarget
   started_at: string
@@ -319,11 +319,20 @@ export const deleteGCPCredentials = () =>
 
 // Deployment Streaming
 export interface DeploymentEvent {
-  step: 'initializing' | 'generating_terraform' | 'validating_credentials' | 'validating' | 'applying' | 'complete' | 'failed'
+  step: 'initializing' | 'generating_terraform' | 'awaiting_approval' | 'validating_credentials' | 'validating' | 'applying' | 'complete' | 'failed'
   message: string
   timestamp: string
   status: Deployment['status']
   detail?: string
+}
+
+// Per-resource HCL detail (parsed from DeploymentEvent.detail JSON during generating_terraform step)
+export interface ResourceHCLDetail {
+  resource_id: string
+  resource_name: string
+  resource_kind: string
+  service_name: string
+  hcl: string
 }
 
 export const getDeploymentStreamUrl = (deploymentId: string) =>
@@ -332,5 +341,11 @@ export const getDeploymentStreamUrl = (deploymentId: string) =>
 export const getDeploymentEventsStreamUrl = (deploymentId: string) =>
   `${API_BASE}/deployments/${deploymentId}/events/stream`
 
+export const getDeploymentApproveStreamUrl = (deploymentId: string) =>
+  `${API_BASE}/deployments/${deploymentId}/approve`
+
 export const getDeploymentEvents = (deploymentId: string) =>
   request<DeploymentEvent[]>(`/deployments/${deploymentId}/events`)
+
+export const rejectDeployment = (deploymentId: string) =>
+  request<{ status: string }>(`/deployments/${deploymentId}/reject`, { method: 'POST' })
